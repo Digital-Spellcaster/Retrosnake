@@ -1,0 +1,3740 @@
+<!DOCTYPE html>
+<!--
+================================================================================
+  RETRO SNAKE — Pixel Art Edition
+  A single-file, offline-ready HTML5 arcade game. Open source: free to play,
+  study, fork, and build on — no permission or attribution required.
+
+  WHY ONE FILE?
+  Everything (HTML structure, CSS, and all game logic) lives in this single
+  document so you can drop it anywhere — open it locally, host it static, or
+  wrap it with Capacitor/Cordova for mobile. No build step, no dependencies,
+  no network calls. Sound is synthesized in code via the Web Audio API, so
+  there are no asset files to ship or license.
+
+  HOW THIS FILE IS ORGANIZED (search for "SECTION:" to jump between parts)
+    1. <head><style> ............ all visual styling, grouped by area
+    2. <body> .................... the game DOM (HUD, screen/canvas, D-pad, menus)
+    3. <script> (main) ........... the whole game, split into labelled SECTIONS:
+         - Config & Constants ..... grid size, difficulty, themes, skins, colors
+         - DOM References ......... cached element lookups
+         - Audio Engine ........... synthesized sound effects (Web Audio)
+         - Layout & Canvas/DPR .... scaling + high-DPI-correct canvas sizing
+         - Rendering .............. draws each frame (snake uses an offscreen canvas)
+         - Game Loop .............. fixed-timestep update + render
+         - Snake / Input .......... movement, direction queue, swipe + D-pad
+         - Collisions ............. walls (or wrap), self, obstacles
+         - Food / Coins / Power-ups
+         - Obstacles
+         - Scoring & Combo
+         - Settings ............... each toggle/cycle + localStorage persistence
+         - High Scores / Unlocks / Lifetime Stats
+         - Celebration / Pause
+         - Menus & Messages ....... settings menu, About, Help, popups
+         - Game Setup ............. initGame / startGame / triggerGameOver
+         - Bootstrap (window.onload)
+    4. <script> blocks (small) ... reduced-motion flag + a few safety shims
+
+  EASY THINGS TO CUSTOMIZE
+    - Add a color theme:  push an entry onto the `gameThemes` array.
+    - Add a snake skin:   push an entry onto the `snakeSkins` array.
+    - Change the board:   `gridSize`, `tileCountX`, `tileCountY` constants.
+    - Retune sounds:      the play*Sound() helpers in the Audio Engine section.
+    - Change difficulty:  the `difficultySettings` object.
+
+  Built across a year of learning to code with AI. If it helps you enjoy
+  making things, it's done its job. Have fun. — the Digital Spellcaster
+================================================================================
+-->
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>Retro Snake - Pixel Art Style (Offline Ready)</title>
+    <style>
+        /* FONT NOTE:
+        This game uses the font stack: 'VT323', 'Courier New', Courier, monospace.
+        No custom webfont is bundled, so it renders with the system monospace fallback (clean and retro).
+        To use a true pixel webfont OFFLINE (e.g. VT323 or 'Press Start 2P'):
+          1. Place the font file (e.g. VT323-Regular.woff2) in the same folder as this HTML.
+          2. Add an @font-face rule here, for example:
+             @font-face { font-family: 'VT323'; src: url('VT323-Regular.woff2') format('woff2'); font-display: swap; }
+          3. The existing font-family declarations will pick it up automatically.
+        */
+        
+
+        /* Basic Reset */
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        /* ============================================================
+           STYLES: Page & Layout
+           Full-screen container that centers and scales the phone to fit.
+           ============================================================ */
+        html, body {
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: #1a1a1a;
+            font-family: 'VT323', 'Courier New', Courier, monospace;
+            color: #c7f0d8;
+            touch-action: manipulation;
+            font-size: 15px;
+        }
+        
+        .game-container {
+            width: 100%;
+            height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: background-color 0.3s ease, border-radius 0.3s ease;
+        }
+
+        .game-wrapper {
+            background-color: #4a5850;
+            padding: 15px;
+            border-radius: 10px;
+            box-shadow: 0 0 20px rgba(0,0,0,0.5), inset 0 0 10px rgba(0,0,0,0.3);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            /* Positioned for scaling */
+            transform-origin: center center;
+            transition: background-color 0.3s ease;
+            position: relative; /* For settings menu positioning */
+        }
+
+        #settings-icon:active, #start-restart-button:active {
+            color: #a8c0b0;
+            transform: scale(0.95); /* Maintained active press effect */
+        }
+
+        /* ============================================================
+           STYLES: Game Screen & Canvas
+           The play area; #game-canvas is sized for crisp high-DPI rendering.
+           ============================================================ */
+        .screen-border {
+            position: relative;
+            background-color: #333;
+            padding: 10px;
+            border-radius: 5px;
+            box-shadow: inset 0 0 5px rgba(0,0,0,0.5);
+            margin-bottom: 15px;
+            margin-top: 5px;
+            max-width: 100%;
+        }
+
+        #game-canvas {
+            border: 2px solid #000000;
+            display: block;
+            image-rendering: pixelated;
+            image-rendering: -moz-crisp-edges;
+            image-rendering: crisp-edges;
+            max-width: 100%;
+            height: auto;
+        }
+        
+        .info-display-container {
+            width: 100%;
+            max-width: 400px; /* Will be adjusted by JS to canvas width */
+            margin-bottom: 15px;
+            padding: 0 5px;
+            color: #1e2d24;
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            font-size: 14px;
+            transition: color 0.3s ease;
+            margin-top: 10px;
+        }
+
+        .info-left-column, .info-right-column {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .info-left-column {
+            align-items: flex-start;
+        }
+        .info-right-column {
+            align-items: flex-end;
+        }
+        
+        /* ============================================================
+           STYLES: HUD — score, coins, combo
+           The neon readouts above the screen.
+           ============================================================ */
+        #score-display {
+            font-size: 24px;
+            transition: all 0.15s ease-in-out; /* For flashing effect */
+            white-space: nowrap; /* Prevent score from wrapping */
+        }
+        .score-flash {
+            color: gold !important; /* Use important to override other styles */
+            text-shadow: 0 0 8px gold;
+            transform: scale(1.1);
+        }
+
+        .electric-text {
+            color: #7DF9FF !important; /* Use important to override other styles */
+            text-shadow: 0 0 2px #00BFFF, 0 0 5px #00BFFF, 0 0 10px #00BFFF, 0 0 15px #00BFFF !important;
+        }
+        
+        .gold-text {
+            color: gold;
+            text-shadow: 0 0 5px gold;
+        }
+
+        #coin-status-display, #powerup-status-display {
+            font-size: 16px;
+            min-height: 1.2em;
+            white-space: nowrap;
+            transition: color 0.3s, text-shadow 0.3s;
+        }
+
+        #combo-status-display {
+            font-size: 16px;
+            min-height: 1.2em;
+            white-space: nowrap;
+            transition: opacity 0.3s ease, transform 0.3s ease;
+            text-shadow: 0 0 5px gold;
+            opacity: 0;
+            transform: translateY(-5px);
+        }
+        #combo-status-display.visible {
+            opacity: 1;
+            transform: translateY(0);
+        }
+
+        #message-box p, #message-box li {
+            font-family: 'VT323', 'Courier New', Courier, monospace;
+        }
+
+        #message-box h3 {
+            font-size: 24px;
+        }
+        #message-box p {
+            font-size: 16px;
+        }
+         #message-box li {
+            font-size: 15px;
+        }
+
+
+        /* ============================================================
+           STYLES: D-Pad & Controls
+           Direction pad, plus the gear (settings) and play/pause buttons.
+           ============================================================ */
+        #bottom-bar {
+            position: static;
+            width: 100%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .controls-container {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            grid-template-rows: repeat(3, 1fr);
+            gap: 12px;
+            width: 300px;
+            height: 300px;
+            margin-top: 5px;
+            margin-bottom: 5px;
+        }
+
+        .control-button {
+            font-family: 'VT323', 'Courier New', Courier, monospace;
+            color: #333;
+            border-width: 1px;
+            border-style: solid;
+            border-color: #bbb #999 #777 #aaa;
+            border-radius: 12px;
+            font-size: 40px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            /* CSS FIXES: Enforce no selection and transparent tap highlight */
+            user-select: none;
+            -webkit-user-select: none;
+            -ms-user-select: none;
+            -webkit-tap-highlight-color: transparent;
+            touch-action: manipulation;
+            pointer-events: auto !important;
+            transition: background 0.15s, transform 0.05s, box-shadow 0.15s, border-color 0.15s, color 0.15s, text-shadow 0.15s;
+            background: linear-gradient(to bottom, #f0f0f0 0%, #d8d8d8 30%, #c0c0c0 60%, #b0b0b0 100%);
+            box-shadow: 0 4px 6px rgba(0,0,0,0.25),
+                        inset 0 1px 1px rgba(255,255,255,0.6),
+                        inset 0 -2px 2px rgba(0,0,0,0.1);
+            text-shadow: 0 1px 0 rgba(255,255,255,0.5);
+        }
+
+        .control-button.control-glow {
+            box-shadow: 0 0 15px 5px rgba(50, 150, 255, 0.7), inset 0 0 10px rgba(50, 150, 255, 0.5);
+            color: #d0e0ff;
+            transform: scale(0.95);
+        }
+
+        /* --- Brushed Aluminum --- */
+        .control-button.brushed-aluminum {
+            background: linear-gradient(to bottom, #e8e8e8 0%, #d8d8d8 40%, #c8c8c8 100%);
+            border-color: #b0b0b0 #a0a0a0 #888888 #b0b0b0;
+            color: #2c3e50;
+            text-shadow: 0 1px 0 rgba(255,255,255,0.3);
+            box-shadow: 0 3px 5px rgba(0,0,0,0.2),
+                        inset 0 1px 1px rgba(255,255,255,0.7),
+                        inset 0 -1px 1px rgba(0,0,0,0.1);
+        }
+
+        /* --- Brushed Bronze --- */
+        .control-button.brushed-bronze {
+            background: linear-gradient(to bottom, #d9ae77 0%, #c89858 40%, #b58240 100%);
+            border-color: #a57230 #906020 #785018 #a57230;
+            color: #4a300f;
+            text-shadow: 0 1px 0 rgba(255,220,180,0.3);
+            box-shadow: 0 3px 5px rgba(50,20,0,0.2),
+                        inset 0 1px 1px rgba(255,230,200,0.7),
+                        inset 0 -1px 1px rgba(50,20,0,0.1);
+        }
+
+        /* --- Anodized Aluminum (Dark/Matte) --- */
+        .control-button.anodized-aluminum {
+            background: linear-gradient(to bottom, #505058 0%, #404048 40%, #303038 100%);
+            border-color: #282828 #181818 #080808 #282828;
+            color: #e0e0e0;
+            text-shadow: 0 1px 0 rgba(0,0,0,0.3);
+            box-shadow: 0 3px 5px rgba(0,0,0,0.3),
+                        inset 0 1px 0px rgba(100,100,100,0.3),
+                        inset 0 -1px 1px rgba(0,0,0,0.2);
+        }
+
+
+        #up-button    { grid-column: 2; grid-row: 1; }
+        #left-button  { grid-column: 1; grid-row: 2; }
+        #right-button { grid-column: 3; grid-row: 2; }
+        #down-button  { grid-column: 2; grid-row: 3; }
+        .empty-cell-1 { grid-column: 1; grid-row: 1; visibility: hidden; }
+        .empty-cell-2 { grid-column: 3; grid-row: 1; visibility: hidden; }
+        .empty-cell-3 { grid-column: 1; grid-row: 3; visibility: hidden; }
+        .empty-cell-4 { grid-column: 3; grid-row: 3; visibility: hidden; }
+        .center-cell  { grid-column: 2; grid-row: 2; visibility: hidden; }
+
+        /* ============================================================
+           STYLES: Settings Menu & Buttons
+           Basic options are visible; the rest sit under the Advanced expander.
+           ============================================================ */
+        #settings-menu {
+            position: absolute; /* 'top' is now set dynamically by JavaScript */
+            left: 50%;
+            transform: translateX(-50%); /* Only center horizontally */
+            background-color: rgba(40, 50, 45, 0.98);
+            color: #c7f0d8;
+            padding: 20px;
+            border-radius: 10px;
+            border: 3px solid #2c3e50;
+            z-index: 120;
+            display: none; /* Initially hidden */
+            flex-direction: column;
+            align-items: center;
+            gap: 6px; /* MODIFIED */
+            box-shadow: 0 0 20px rgba(0,0,0,0.6);
+            overflow-y: auto; /* Allow scrolling for many options */
+        }
+
+        .settings-button {
+            font-family: 'VT323', 'Courier New', Courier, monospace;
+            color: white;
+            border: 1px solid rgba(0,0,0,0.2);
+            padding: 6px 15px;      /* MODIFIED */
+            font-size: 12px;
+            border-radius: 6px;
+            cursor: pointer;
+            width: 100%;
+            text-align: center;
+            transition: background-color 0.15s, transform 0.1s, box-shadow 0.15s, color 0.2s, text-shadow 0.2s;
+            margin-bottom: 6px;     /* MODIFIED */
+            text-shadow: 1px 1px 1px rgba(0,0,0,0.2);
+            background-color: #566573;
+            box-shadow: 0 3px #3d4a55, 0 4px 6px rgba(0,0,0,0.15);
+            white-space: nowrap;
+        }
+        .settings-button:last-child {
+            margin-bottom: 0;
+        }
+        .settings-button:active {
+            transform: translateY(1px) scale(0.98);
+            box-shadow: inset 0 1px 3px rgba(0,0,0,0.3);
+        }
+         .settings-button.locked {
+            color: #888;
+            background-color: #444;
+            cursor: not-allowed;
+            box-shadow: 0 3px #222;
+        }
+        .settings-button.locked:active {
+            transform: translateY(0) scale(1);
+            box-shadow: 0 3px #222;
+        }
+        
+        /* QA FIX: Removed green background from active-setting */
+        .settings-button.active-setting {
+             /* No special background, inherits from .settings-button */
+        }
+        .settings-button.active-setting:active {
+            /* Keep a subtle active press effect if needed */
+            transform: translateY(1px) scale(0.98);
+            box-shadow: inset 0 1px 3px rgba(0,0,0,0.3);
+        }
+
+        /* QA FIX: Replaced green background with a neutral style + highlight for 'Easy' */
+        #cycle-difficulty-button.difficulty-easy { 
+            background-color: #566573; /* Neutral color */
+        }
+        #cycle-difficulty-button.difficulty-easy:active { 
+            background-color: #6c7a89;
+            box-shadow: 0 2px #3d4a55, inset 0 1px 3px rgba(0,0,0,0.3);
+        }
+        #cycle-difficulty-button.difficulty-normal { background-color: #566573;
+            box-shadow: 0 3px #3d4a55, 0 4px 6px rgba(0,0,0,0.15);}
+        #cycle-difficulty-button.difficulty-normal:active { background-color: #6c7a89;
+            box-shadow: 0 2px #3d4a55, inset 0 1px 3px rgba(0,0,0,0.3);}
+        #cycle-difficulty-button.difficulty-hard { background-color: #566573;
+            box-shadow: 0 3px #3d4a55, 0 4px 6px rgba(0,0,0,0.15);}
+        #cycle-difficulty-button.difficulty-hard:active { background-color: #6c7a89;
+            box-shadow: 0 2px #3d4a55, inset 0 1px 3px rgba(0,0,0,0.3);}
+        #cycle-difficulty-button.difficulty-very-hard {
+            background-color: #566573; /* Same red as Hard */
+            box-shadow: 0 3px #3d4a55, 0 4px 6px rgba(0,0,0,0.15);
+            color: white;
+            text-shadow: 1px 1px 1px rgba(0,0,0,0.2);
+        }
+        #cycle-difficulty-button.difficulty-very-hard:active {
+            background-color: #6c7a89;
+            box-shadow: 0 2px #3d4a55, inset 0 1px 3px rgba(0,0,0,0.3);
+            color: white;
+        }
+
+        #settings-menu h3 {
+            font-size: 20px;
+            margin-bottom: 12px;
+            color: #ecf0f1;
+            text-decoration: none; /* QA FIX: No underline */
+            text-shadow: 0 0 2px #00BFFF, 0 0 5px #00BFFF, 0 0 10px #00BFFF, 0 0 15px #00BFFF; /* QA FIX: Neon blue glow */
+            text-align: center;
+        }
+        
+        .settings-button.electric-text {
+            color: #7DF9FF !important; /* Use important to override other styles */
+            text-shadow: 0 0 2px #00BFFF, 0 0 5px #00BFFF, 0 0 10px #00BFFF, 0 0 15px #00BFFF !important;
+        }
+
+        .settings-button.battery-low { color: #2ecc71; }
+        .settings-button.battery-medium { color: #f1c40f; }
+        .settings-button.battery-high { color: #e67e22; }
+        .settings-button.battery-extreme { color: #c0392b; }
+        .settings-button.battery-ultimate-plus { color: #9b59b6; } /* Purple for Ultimate+ */
+        
+        .settings-button.battery-high, .settings-button.electric-text {
+             /* QA FIX: The .electric-text class handles the neon blue glow */
+        }
+        #cycle-graphics-mode-button.battery-extreme, #cycle-graphics-mode-button.battery-high, #toggle-obstacles-button.electric-text, #cycle-graphics-mode-button.battery-ultimate-plus {
+             background-color: #566573; /* Ensure consistency */
+             box-shadow: 0 3px #3d4a55, 0 4px 6px rgba(0,0,0,0.15);
+             color: #7DF9FF !important;
+             text-shadow: 0 0 2px #00BFFF, 0 0 5px #00BFFF, 0 0 10px #00BFFF, 0 0 15px #00BFFF !important;
+        }
+        
+        #menu-unlocks-high-scores-button, #menu-about-button, #menu-help-button {
+             background-color: #3498db;
+             box-shadow: 0 3px #2980b9, 0 4px 6px rgba(0,0,0,0.15);
+        }
+         #menu-unlocks-high-scores-button:active, #menu-about-button:active, #menu-help-button:active {
+             background-color: #2980b9;
+             box-shadow: 0 2px #2980b9, inset 0 1px 3px rgba(0,0,0,0.3);
+        }
+
+        #save-and-play-button {
+            background-color: #27ae60;
+            box-shadow: 0 3px #1e8449, 0 4px 6px rgba(0,0,0,0.15);
+            margin-top: 12px;
+        }
+        #save-and-play-button:active { background-color: #2ecc71;
+            box-shadow: 0 2px #1e8449, inset 0 1px 3px rgba(0,0,0,0.3); }
+
+        #menu-exit-game-button {
+            background-color: #d35400;
+            box-shadow: 0 3px #a04000, 0 4px 6px rgba(0,0,0,0.15);
+            margin-top: 8px;
+        }
+        #menu-exit-game-button:active { background-color: #a04000;
+            box-shadow: 0 2px #a04000, inset 0 1px 3px rgba(0,0,0,0.3);}
+
+        /* Message Box Styling */
+        /* ============================================================
+           STYLES: Popups — About / Help / Game Over
+           Shared modal used for all in-game messages.
+           ============================================================ */
+        #message-box {
+            position: absolute;
+            top: 40%; 
+            left: 50%; 
+            transform: translate(-50%, -50%);
+            background-color: rgba(26, 26, 26, 0.95);
+            color: #e0e0e0;
+            padding: 25px 30px;
+            border-radius: 10px;
+            text-align: center;
+            font-size: 14px;
+            z-index: 130; /* Higher than settings menu */
+            display: none; /* Initially hidden */
+            border: 2px solid #505050;
+            width: 85%;
+            max-width: 400px;
+            box-shadow: 0 8px 30px rgba(0,0,0,0.7);
+            max-height: 80vh;
+            overflow-y: auto;
+        }
+        #message-box h3 {
+            font-size: 20px;
+            margin-bottom: 18px;
+            color: #f0c040;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        #message-box p {
+            margin-bottom: 15px;
+            font-size: 14px;
+            line-height: 1.8;
+            color: #b0b0b0;
+        }
+        #message-box ul { list-style-position: inside;
+            padding-left: 0; margin-bottom: 20px; text-align: left;}
+        #message-box li { font-size: 13px; margin-bottom: 10px;
+            line-height: 1.6;}
+
+        .about-content .version-text {
+            font-size: 13px;
+            color: #999; margin-top: 5px; margin-bottom: 2px;
+            cursor: pointer; user-select: none; -webkit-user-select: none; display: block;
+        }
+         .about-content .code-lines-text { font-size: 9px; color: #777; margin-bottom: 10px; display: block;
+         }
+        .about-content .credits-text { font-size: 12px; color: #a0a0a0; line-height: 1.6;
+        }
+        .about-content .credits-text strong { color: #c0c0c0;
+        }
+        .about-content .separator, .help-content .separator, .unlock-separator, .high-score-separator {
+            border-top: 1px dashed #444;
+            margin: 15px auto; width: 70%;
+        }
+        .unlocks-section { margin-top: 15px; text-align: left;
+        }
+        .unlocks-section h4 { font-size: 14px; color: #e0e0e0; margin-bottom: 10px; text-decoration: underline;
+        }
+        .unlocks-section ul { list-style-type: none; padding-left: 0;
+        }
+        .unlocks-section li { font-size: 11px; margin-bottom: 6px; color: #b0b0b0;
+        }
+        .unlocks-section li.unlocked { color: #2ecc71;
+        }
+        .unlocks-section li.locked { color: #c0392b;
+        }
+        .unlocks-section li .item-name { font-weight: bold;
+        }
+        .unlocks-section li .item-status { margin-left: 5px;
+        }
+
+        #message-box button {
+            font-family: 'VT323', 'Courier New', Courier, monospace;
+            background-color: #c0392b;
+            color: white;
+            border: 1px solid #7b241c;
+            padding: 12px 22px;
+            font-size: 14px;
+            border-radius: 6px;
+            cursor: pointer;
+            box-shadow: 0 3px #922b21, 0 4px 6px rgba(0,0,0,0.2);
+            margin-top: 25px;
+            transition: background-color 0.1s, transform 0.1s;
+            text-shadow: 1px 1px 1px rgba(0,0,0,0.2);
+        }
+        #message-box button:active {
+            background-color: #922b21;
+            transform: translateY(1px) scale(0.98);
+            box-shadow: 0 2px #922b21, inset 0 1px 2px rgba(0,0,0,0.3);
+        }
+
+        /* Responsive adjustments */
+        @media (max-width: 480px) {
+            .controls-container { width: 260px;
+                height: 260px; }
+            .control-button { font-size: 34px; border-radius: 8px;
+            }
+        }
+    </style>
+
+
+
+<style>
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001s !important;
+    animation-iteration-count: 1 !important;
+    transition: none !important;
+    scroll-behavior: auto !important;
+  }
+  .game-container, .game-wrapper, #score-display, #combo-status-display, .control-button {
+    transition: none !important;
+    transform: none !important;
+  }
+}
+</style>
+
+
+<style id="top-icons-patch">
+/* --- Patch: place small translucent gear (left) and play (right) at the top of the phone --- */
+#settings-icon, #start-restart-button{
+  position:absolute;
+  top:6px;
+  width:34px; height:34px;
+  display:flex; align-items:center; justify-content:center;
+  font-size:20px; line-height:1;
+  border-radius:8px;
+  background: linear-gradient(to bottom, rgba(255,255,255,.12), rgba(0,0,0,.15));
+  border:1px solid rgba(0,0,0,.35);
+  box-shadow: 0 2px 3px rgba(0,0,0,.25), inset 0 1px 0 rgba(255,255,255,.2);
+  opacity:.5; z-index:110; cursor:pointer;
+  user-select:none; -webkit-tap-highlight-color: transparent;
+}
+#settings-icon:hover, #start-restart-button:hover{ opacity:1; }
+#settings-icon{ left:6px; }
+#start-restart-button{ right:6px; }
+</style>
+
+<style id="enhanced-styles">
+/* --- Large Fonts (accessibility) --- */
+body.large-fonts #score-display { font-size: 30px; }
+body.large-fonts #coin-status-display,
+body.large-fonts #combo-status-display { font-size: 20px; }
+body.large-fonts .settings-button { font-size: 15px; }
+body.large-fonts #settings-menu h3 { font-size: 24px; }
+body.large-fonts #message-box h3 { font-size: 24px; }
+body.large-fonts #message-box p { font-size: 17px; }
+body.large-fonts #message-box li { font-size: 16px; }
+body.large-fonts .stat-row { font-size: 15px; }
+
+/* --- Settings menu section headers --- */
+.settings-section {
+  width: 100%;
+  text-align: left;
+  font-size: 11px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: #7DF9FF;
+  opacity: 0.85;
+  margin: 10px 0 2px 2px;
+  padding-bottom: 3px;
+  border-bottom: 1px solid rgba(125,249,255,0.22);
+}
+.settings-section:first-of-type { margin-top: 2px; }
+
+/* --- Lifetime stats panel (About screen) --- */
+.stats-heading {
+  text-align: center;
+  color: #f0c040;
+  margin-bottom: 6px;
+  font-size: 15px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+.stats-panel { margin: 6px auto 4px; max-width: 280px; text-align: left; }
+.stat-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  padding: 6px 4px;
+  border-bottom: 1px dashed #444;
+  font-size: 13px;
+}
+.stat-row:last-child { border-bottom: none; }
+.stat-label { color: #b0b0b0; }
+.stat-value { color: #f0c040; font-weight: bold; }
+
+/* --- About-screen message (open-source note) --- */
+.dedication { color: #f0c040; font-size: 14px; line-height: 1.65; text-align: center; margin-top: 6px; }
+.dedication .sig { display: block; margin-top: 8px; font-style: italic; color: #ffd970; }
+
+/* --- Basic / Advanced settings expander --- */
+.advanced-toggle {
+  font-family: 'VT323', 'Courier New', Courier, monospace;
+  width: 100%;
+  text-align: center;
+  font-size: 13px;
+  letter-spacing: 1px;
+  padding: 6px 15px;
+  margin: 4px 0 6px;
+  border-radius: 6px;
+  cursor: pointer;
+  color: #7DF9FF;
+  background-color: rgba(125,249,255,0.08);
+  border: 1px dashed rgba(125,249,255,0.4);
+  text-transform: uppercase;
+}
+.advanced-toggle .adv-arrow { display: inline-block; transition: transform 0.2s ease; }
+.advanced-toggle.open .adv-arrow { transform: rotate(90deg); }
+.advanced-panel { display: none; flex-direction: column; align-items: center; width: 100%; gap: 6px; }
+.advanced-panel.open { display: flex; }
+
+/* --- New-high-score celebration --- */
+#confetti-layer { position: fixed; top: 0; left: 0; right: 0; bottom: 0; pointer-events: none; z-index: 300; overflow: hidden; }
+.confetti-piece { position: absolute; top: -24px; border-radius: 1px; opacity: 0.95; animation-name: confetti-fall; animation-timing-function: linear; animation-fill-mode: forwards; }
+@keyframes confetti-fall {
+  0%   { transform: translateY(-24px) rotate(0deg); opacity: 1; }
+  100% { transform: translateY(106vh) rotate(560deg); opacity: 0.85; }
+}
+.newbest-banner {
+  position: fixed; top: 16%; left: 50%;
+  z-index: 320; pointer-events: none;
+  font-family: 'VT323', 'Courier New', monospace; font-size: 32px; color: #FFD54F;
+  text-shadow: 0 0 8px rgba(255,213,79,0.85), 2px 2px 2px rgba(0,0,0,0.5);
+  white-space: nowrap;
+  animation: newbest-pop 2s ease-out forwards;
+}
+@keyframes newbest-pop {
+  0%   { opacity: 0; transform: translateX(-50%) scale(0.6); }
+  15%  { opacity: 1; transform: translateX(-50%) scale(1.12); }
+  30%  { transform: translateX(-50%) scale(1.0); }
+  80%  { opacity: 1; transform: translateX(-50%) scale(1.0) translateY(0); }
+  100% { opacity: 0; transform: translateX(-50%) scale(1.0) translateY(-22px); }
+}
+
+/* --- Pause overlay --- */
+#pause-overlay {
+  position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+  display: none;
+  flex-direction: column; align-items: center; justify-content: center;
+  background: rgba(0,0,0,0.55);
+  z-index: 60;
+  cursor: pointer;
+  border-radius: 5px;
+  -webkit-tap-highlight-color: transparent;
+}
+#pause-overlay.shown { display: flex; }
+#pause-overlay .pause-title {
+  font-family: 'VT323', 'Courier New', monospace;
+  font-size: 40px; letter-spacing: 3px; color: #FFD54F;
+  text-shadow: 0 0 10px rgba(255,213,79,0.6), 2px 2px 2px rgba(0,0,0,0.5);
+}
+#pause-overlay .pause-hint {
+  font-family: 'VT323', 'Courier New', monospace;
+  font-size: 16px; color: #e8e8e8; margin-top: 8px; opacity: 0.9;
+}
+body.large-fonts #pause-overlay .pause-title { font-size: 48px; }
+body.large-fonts #pause-overlay .pause-hint { font-size: 20px; }
+</style>
+
+</head>
+<body>
+
+    <div class="game-container">
+        <div class="game-wrapper">
+            
+            <div class="info-display-container">
+                <div class="info-left-column">
+                    <div id="score-display" class="electric-text">SCORE: 0</div>
+                    <div id="combo-status-display" class="gold-text"></div>
+                </div>
+                <div class="info-right-column">
+                    <div id="coin-status-display" class="gold-text"></div>
+                </div>
+            </div>
+
+            <div class="screen-border">
+                <canvas id="game-canvas"></canvas>
+                <div id="pause-overlay" aria-hidden="true">
+                    <div class="pause-title">&#10074;&#10074; PAUSED</div>
+                    <div class="pause-hint">Tap to resume</div>
+                </div>
+            </div>
+
+            <div id="bottom-bar">
+                <div class="controls-container">
+                    <div class="empty-cell-1"></div> <button id="up-button" class="control-button">&#9650;</button> <div class="empty-cell-2"></div>
+                    <button id="left-button" class="control-button">&#9664;</button> <div class="center-cell"></div> <button id="right-button" class="control-button">&#9654;</button> <div class="empty-cell-3"></div>
+                    <button id="down-button" class="control-button">&#9660;</button> <div class="empty-cell-4"></div>
+                </div>
+                <button id="settings-icon">⚙</button>
+                <button id="start-restart-button">&#9654;</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="confetti-layer" aria-hidden="true"></div>
+
+    <div id="settings-menu">
+        <h3>Settings</h3>
+
+        <button id="cycle-difficulty-button" class="settings-button">DIFFICULTY: NORMAL</button>
+        <button id="toggle-walls-button" class="settings-button">WALLS: ON</button>
+        <button id="cycle-game-theme-button" class="settings-button">GAME THEME: CLASSIC</button>
+        <button id="cycle-phone-color-button" class="settings-button">PHONE COLOR: OLIVE</button>
+        <button id="toggle-large-fonts-button" class="settings-button">LARGE FONTS: OFF</button>
+        <button id="toggle-sounds-button" class="settings-button">SOUNDS: ON</button>
+
+        <button id="advanced-toggle" class="advanced-toggle" aria-expanded="false"><span class="adv-arrow">&#9656;</span> Advanced Settings</button>
+        <div id="advanced-settings" class="advanced-panel">
+            <button id="toggle-swipe-button" class="settings-button">SWIPE CONTROLS: ON</button>
+            <button id="cycle-screen-mode-button" class="settings-button">SCREEN MODE: CLASSIC</button>
+            <button id="cycle-snake-skin-button" class="settings-button">SNAKE SKIN: THEME</button>
+            <button id="toggle-keep-theme-button" class="settings-button">KEEP CURRENT THEME: ON</button>
+            <button id="cycle-dpad-style-button" class="settings-button">D-PAD STYLE: CLASSIC</button>
+            <button id="cycle-graphics-mode-button" class="settings-button">GRAPHICS: PERFORMANCE</button>
+            <button id="cycle-fps-limit-button" class="settings-button">FPS LIMIT: 60</button>
+            <button id="toggle-obstacles-button" class="settings-button">OBSTACLES: OFF</button>
+            <button id="toggle-haptics-button" class="settings-button">HAPTICS: ON</button>
+            <button id="menu-unlocks-high-scores-button" class="settings-button">UNLOCKS & HI SCORES</button>
+            <button id="menu-help-button" class="settings-button">HELP</button>
+            <button id="menu-about-button" class="settings-button">ABOUT</button>
+        </div>
+
+        <button id="save-and-play-button" class="settings-button">SAVE AND PLAY</button>
+        <button id="menu-exit-game-button" class="settings-button">EXIT GAME</button>
+    </div>
+
+    <div id="message-box">
+        </div>
+
+    <!-- Sound effects are synthesized in code via the Web Audio API — no external audio files, nothing to license or credit. -->
+
+    <script>
+        /* ============================================================
+           SECTION: CONFIG, CONSTANTS & DOM REFERENCES
+           Cached element lookups + tunable game constants live here and just below.
+           ============================================================ */
+        // Game Canvas and Context
+        const canvas = document.getElementById('game-canvas');
+        let ctx = canvas.getContext('2d');
+        const gameContainer = document.querySelector('.game-container');
+        const gameWrapper = document.querySelector('.game-wrapper');
+        const infoDisplay = document.querySelector('.info-display-container');
+        const coinStatusDisplay = document.getElementById('coin-status-display');
+        const comboStatusDisplay = document.getElementById('combo-status-display');
+        
+        // --- Offscreen Canvas for Snake ---
+        const snakeCanvas = document.createElement('canvas');
+        const snakeCtx = snakeCanvas.getContext('2d');
+
+        // UI Elements
+        const scoreDisplay = document.getElementById('score-display');
+        const startRestartButton = document.getElementById('start-restart-button');
+        const messageBox = document.getElementById('message-box');
+        const settingsIcon = document.getElementById('settings-icon');
+        const settingsMenu = document.getElementById('settings-menu');
+        const bottomBar = document.getElementById('bottom-bar');
+        // Settings Menu Buttons
+        const cycleDifficultyButton = document.getElementById('cycle-difficulty-button');
+        const cycleScreenModeButton = document.getElementById('cycle-screen-mode-button');
+        const cycleGameThemeButton = document.getElementById('cycle-game-theme-button');
+        const cyclePhoneColorButton = document.getElementById('cycle-phone-color-button');
+        const cycleSnakeSkinButton = document.getElementById('cycle-snake-skin-button');
+        const cycleDPadStyleButton = document.getElementById('cycle-dpad-style-button');
+        const cycleGraphicsModeButton = document.getElementById('cycle-graphics-mode-button');
+        const cycleFpsLimitButton = document.getElementById('cycle-fps-limit-button');
+        const toggleObstaclesButton = document.getElementById('toggle-obstacles-button');
+        const toggleSoundsButton = document.getElementById('toggle-sounds-button');
+        const toggleHapticsButton = document.getElementById('toggle-haptics-button');
+        const toggleWallsButton = document.getElementById('toggle-walls-button');
+        const toggleSwipeButton = document.getElementById('toggle-swipe-button');
+        const toggleLargeFontsButton = document.getElementById('toggle-large-fonts-button');
+        const toggleKeepThemeButton = document.getElementById('toggle-keep-theme-button');
+        const advancedToggle = document.getElementById('advanced-toggle');
+        const advancedSettings = document.getElementById('advanced-settings');
+        const menuUnlocksHighScoresButton = document.getElementById('menu-unlocks-high-scores-button');
+        const menuAboutButton = document.getElementById('menu-about-button');
+        const menuHelpButton = document.getElementById('menu-help-button');
+        const saveAndPlayButton = document.getElementById('save-and-play-button');
+        const menuExitGameButton = document.getElementById('menu-exit-game-button');
+        // Control Buttons
+        const upButton = document.getElementById('up-button');
+        const downButton = document.getElementById('down-button');
+        const leftButton = document.getElementById('left-button');
+        const rightButton = document.getElementById('right-button');
+        const controlButtonElements = [upButton, downButton, leftButton, rightButton];
+        const controlsContainer = document.querySelector('.controls-container');
+        // Audio Elements
+        // Sound identifiers — audio is synthesized (see the Web Audio engine in playSfx below)
+        const sfxEat = 'eat';
+        const sfxClick = 'click';
+        const sfxPowerup = 'powerup';
+        const sfxCoin = 'coin';
+        const sfxGameOver = 'gameover';
+
+        // Audio & Haptics State
+        let areSoundsEnabled = true;
+        let isHapticsEnabled = true;
+        const SOUNDS_ENABLED_STORAGE_KEY = 'retroSnakeSoundsEnabled_v1';
+        const HAPTICS_ENABLED_STORAGE_KEY = 'retroSnakeHapticsEnabled_v1';
+
+        // --- Game & UI Constants ---
+        const START_ICON = '&#9654;'; // ▶
+        const RESTART_ICON = '&#8634;'; // ↻
+        const PAUSE_ICON = '&#10074;&#10074;'; // ❚❚
+
+        // Game Settings
+        const gridSize = 20;
+        let tileCountX = 20;
+        let tileCountY = 27;
+        const THEME_CYCLE_THRESHOLD = 4;
+        const THEME_CYCLE_FOOD_COUNT = 3;
+        const THEME_CYCLE_BONUS_POINTS = 50;
+        const SCORE_BONUS_OBSTACLES = 1.5;
+        const UNIQUE_FOOD_GREEN = '#33FF33';
+        const UNIQUE_FOOD_GREEN_BORDER = '#00CC00';
+        // Unlockable Items Settings
+        const TOTAL_FOOD_EATEN_OVERALL_STORAGE_KEY = 'retroSnakeTotalFoodOverall_v2';
+        const UNLOCKED_ITEMS_NOTIFIED_KEY = 'retroSnakeUnlockedNotified_v2';
+        let totalFoodEatenOverall = 0;
+        let playerUnlockLevel = 0;
+        let unlockedItemsNotified = {};
+        let pendingUnlockNotificationsInSession = [];
+        // Difficulty Settings
+        const difficultyLevels = ['easy', 'normal', 'hard', 'very-hard'];
+        const difficultySettings = {
+            easy:   { initialSpeed: 300, speedIncrement: 2, minSpeed: 145, label: 'EASY', pointsPerFood: 10, colorClass: 'difficulty-easy' },
+            normal: { initialSpeed: 250, speedIncrement: 2, minSpeed: 120,  label: 'NORMAL', pointsPerFood: 15, colorClass: 'difficulty-normal' },
+            hard:   { initialSpeed: 200, speedIncrement: 3, minSpeed: 80,  label: 'HARD', pointsPerFood: 20, colorClass: 'difficulty-hard' },
+            'very-hard': { initialSpeed: 150, speedIncrement: 4, minSpeed: 50, label: 'VERY HARD', pointsPerFood: 30, colorClass: 'difficulty-very-hard' }
+        };
+        let currentDifficultyIndex = 1;
+        const DIFFICULTY_STORAGE_KEY = 'retroSnakeDifficultyIndex_v2';
+
+        // Screen Mode Setting
+        const screenModes = ['classic', 'stretch'];
+        let currentScreenModeIndex = 0;
+        const SCREEN_MODE_STORAGE_KEY = 'retroSnakeScreenMode_v1';
+
+        // Game Themes
+        /* ============================================================
+           SECTION: THEMES, PHONE SKINS & SNAKE SKINS
+           Add a theme/skin by pushing an object onto the matching array.
+           ============================================================ */
+        let gameThemes = [
+            { name: 'Classic', canvasBg: '#add8e6', snakeHead: '#0F3D2E', snakeBody: '#1C5C3E', foodColor: '#E53935', obstacleColor: '#5A5A5A', unlockLevelRequired: 0},
+            { name: 'Noir', canvasBg: '#000000', snakeHead: '#FF1744', snakeBody: '#FF5252', foodColor: UNIQUE_FOOD_GREEN, obstacleColor: '#404040', unlockLevelRequired: 0},
+            { name: 'Terminal', canvasBg: '#003000', snakeHead: '#39FF14', snakeBody: '#6EFF6E', foodColor: '#FFC107', obstacleColor: '#1C3A1C', unlockLevelRequired: 0},
+            { name: 'Synth', canvasBg: '#200040', snakeHead: '#00E5FF', snakeBody: '#36C6FF', foodColor: UNIQUE_FOOD_GREEN, obstacleColor: '#3A1A5C', unlockLevelRequired: 0},
+            { name: 'Mono', canvasBg: '#404040', snakeHead: '#FFFFFF', snakeBody: '#DADADA', foodColor: UNIQUE_FOOD_GREEN, obstacleColor: '#1E1E1E', unlockLevelRequired: 0},
+            { name: 'Desert', canvasBg: '#4A2A00', snakeHead: '#FFD54F', snakeBody: '#FFB74D', foodColor: UNIQUE_FOOD_GREEN, obstacleColor: '#2E1A00', unlockLevelRequired: 0},
+            { name: 'World 3', canvasBg: '#201830', snakeHead: '#EAEAFF', snakeBody: '#C4B4EC', foodColor: UNIQUE_FOOD_GREEN, obstacleColor: '#3A2F55', unlockLevelRequired: 0},
+            { name: 'Skyward', canvasBg: '#2E6FD6', snakeHead: '#FFFFFF', snakeBody: '#E3F2FD', foodColor: '#FFD600', obstacleColor: '#1B4F9C', unlockLevelRequired: 0},
+            { name: 'Jungle', canvasBg: '#101018', snakeHead: '#FF7043', snakeBody: '#FF8A65', foodColor: UNIQUE_FOOD_GREEN, obstacleColor: '#282830', unlockLevelRequired: 0},
+            { name: 'Temple', canvasBg: '#206020', snakeHead: '#FFD740', snakeBody: '#FFCA28', foodColor: '#FF5252', obstacleColor: '#0D330D', unlockLevelRequired: 0 },
+            { name: 'Blocker', canvasBg: '#00004D', snakeHead: '#FFEB3B', snakeBody: '#FFD600', foodColor: UNIQUE_FOOD_GREEN, obstacleColor: '#6E6E8A', unlockLevelRequired: 15, isNewUnlock: true },
+            { name: 'Castles', canvasBg: '#2E2E2E', snakeHead: '#FF5252', snakeBody: '#BA68C8', foodColor: '#F0F0F0', obstacleColor: '#4A4A4A', unlockLevelRequired: 30, isNewUnlock: true },
+            { name: 'Adventure', canvasBg: '#228B22', snakeHead: '#FFFFFF', snakeBody: '#E8F5E9', foodColor: '#FFD700', obstacleColor: '#5D4037', unlockLevelRequired: 45, isNewUnlock: true },
+            { name: 'Mystic', canvasBg: '#24003C', snakeHead: '#EDE7F6', snakeBody: '#CE93D8', foodColor: '#FFFF80', obstacleColor: '#3A1A55', unlockLevelRequired: 60, isNewUnlock: true },
+            { name: 'Lightfoot', canvasBg: '#553B1E', snakeHead: '#C6FF00', snakeBody: '#AEEA00', foodColor: '#4FC3F7', obstacleColor: '#006400', unlockLevelRequired: 75, isNewUnlock: true }
+        ];
+        let currentGameThemeIndex = 0;
+        let foodEatenForThemeCycle = 0;
+        const GAME_THEME_STORAGE_KEY = 'retroSnakeGameThemeIndex_v1';
+        // Phone Colors
+        let phoneColors = [
+            { name: 'Olive', style: '#4a5850', infoTextColor: '#1e2d24', unlockLevelRequired: 0 },
+            { name: 'Charcoal', style: '#303030', infoTextColor: '#E0E0E0', unlockLevelRequired: 0 },
+            { name: 'Deep Blue', style: '#202830', infoTextColor: '#D0E0F0', unlockLevelRequired: 0 },
+            { name: 'Forest', style: '#283020', infoTextColor: '#D0F0D0', unlockLevelRequired: 0 },
+            { name: 'Plum', style: '#302028', infoTextColor: '#F0D0E0', unlockLevelRequired: 0 },
+            { name: 'Retro TV', style: '#332211', infoTextColor: '#F5E5D5', unlockLevelRequired: 0 },
+            { name: 'Cosmic', style: '#000033', infoTextColor: '#80FFFF', unlockLevelRequired: 90, isNewUnlock: true },
+            { name: 'Castle Stone', style: '#1C1C1C', infoTextColor: '#DC143C', unlockLevelRequired: 105, isNewUnlock: true },
+            { name: 'Enchanted', style: '#004D00', infoTextColor: '#FFFACD', unlockLevelRequired: 120, isNewUnlock: true },
+            { name: 'Mystic Purple', style: '#301040', infoTextColor: '#C0C0FF', unlockLevelRequired: 135, isNewUnlock: true },
+            { name: 'Jungle Brown', style: '#4A2A00', infoTextColor: '#90EE90', unlockLevelRequired: 150, isNewUnlock: true }
+        ];
+        let currentPhoneColorIndex = 0;
+        const PHONE_COLOR_STORAGE_KEY = 'retroSnakePhoneColorIndex_v1';
+
+        // Snake Skins
+        let snakeSkins = [
+            { name: 'THEME SNAKE', unlockLevelRequired: 0, patternType: 'theme_default', isNewUnlock: false }, // Default, uses theme colors
+            { name: 'Emerald', unlockLevelRequired: 10, headColor: '#006400', bodyPattern: ['#228B22', '#32CD32'], patternType: 'alternating', isNewUnlock: true },
+            { name: 'Ruby Red', unlockLevelRequired: 25, headColor: '#8B0000', bodyPattern: ['#DC143C', '#CD5C5C'], patternType: 'alternating',
+            isNewUnlock: true },
+            { name: 'Sapphire', unlockLevelRequired: 50, headColor: '#000080', bodyPattern: ['#1E90FF', '#0000CD'], patternType: 'striped_thin', isNewUnlock: true },
+            { name: 'Gold Mamba', unlockLevelRequired: 75, headColor: '#B8860B', bodyPattern: ['#FFD700', '#DAA520'], patternType: 'solid_body_only', isNewUnlock: true },
+            { name: 'Monochrome', unlockLevelRequired: 90, headColor: '#101010', bodyPattern: ['#505050', '#A0A0A0'], patternType: 'alternating', isNewUnlock: true }
+        ];
+        let currentSnakeSkinIndex = 0;
+        const SNAKE_SKIN_STORAGE_KEY = 'retroSnakeSkinIndex_v1';
+
+        // D-Pad Styles
+        const D_PAD_STYLE_CLASSIC = 'classic';
+        const D_PAD_STYLE_BRUSHED_ALUMINUM = 'brushed-aluminum';
+        const D_PAD_STYLE_BRUSHED_BRONZE = 'brushed-bronze';
+        const D_PAD_STYLE_ANODIZED_ALUMINUM = 'anodized-aluminum';
+        const dPadStyles = [
+            { name: 'CLASSIC', class: D_PAD_STYLE_CLASSIC, unlockLevelRequired: 0 },
+            { name: 'ALUMINUM', class: D_PAD_STYLE_BRUSHED_ALUMINUM, unlockLevelRequired: 0 },
+            { name: 'BRONZE', class: D_PAD_STYLE_BRUSHED_BRONZE, unlockLevelRequired: 0 },
+            { name: 'ANODIZED', class: D_PAD_STYLE_ANODIZED_ALUMINUM, unlockLevelRequired: 0 }
+        ];
+        let currentDPadStyleIndex = 0;
+        const D_PAD_STYLE_STORAGE_KEY = 'retroSnakeDPadStyleIndex_v1';
+
+        // --- Graphics Mode Setting with Ultimate+ ---
+        const graphicsModes = [
+            { name: 'PERFORMANCE', battery: 'low' },
+            { name: 'QUALITY', battery: 'medium' },
+            { name: 'ULTRA', battery: 'high' },
+            { name: 'ULTIMATE', battery: 'extreme' },
+            { name: 'ULTIMATE+', battery: 'ultimate-plus' } 
+        ];
+        let currentGraphicsModeIndex = 0;
+        const GRAPHICS_MODE_STORAGE_KEY = 'retroSnakeGraphicsMode_v3'; // Incremented version
+
+        // FPS Limit Setting
+        const fpsLimits = [
+            { value: 30, battery: 'low' },
+            { value: 60, battery: 'medium' },
+            { value: 90, battery: 'high' }
+        ];
+        let currentFpsLimitIndex = 1; // Default to 60 FPS
+        const FPS_LIMIT_STORAGE_KEY = 'retroSnakeFpsLimit_v2';
+        // Food and Power-up Types and Settings
+        const FOOD_TYPE_NORMAL = 'NORMAL';
+        const POWERUP_TYPE_GHOST = 'GHOST_MODE';
+        const POWERUP_TYPE_STAR = 'STAR_POWER';
+        const POWERUP_TYPE_FOOD_MAGNET = 'FOOD_MAGNET';
+        const POWERUP_TYPE_LENGTH_CUTTER = 'LENGTH_CUTTER';
+        const POWERUP_TYPE_COIN = 'COIN_ITEM';
+        const OBSTACLE_TYPE_SPIKE_BLOCK = 'SPIKE_BLOCK_OBSTACLE';
+
+        const GHOST_DURATION = 7000;
+        const STAR_DURATION = 10000;
+        const FOOD_MAGNET_DURATION = 8000;
+        const FOOD_MAGNET_RADIUS = 6 * gridSize;
+        const MAGNET_SNAP_RADIUS_PX = gridSize * 1.5; // Snap radius is 1.5 tiles (30px)
+
+        const LENGTH_CUTTER_SEGMENTS_TO_REMOVE = 5;
+
+        const POINTS_GHOST_POWERUP = 25;
+        const POINTS_STAR_POWERUP = 30;
+        const POINTS_FOOD_MAGNET_POWERUP = 15;
+        const POINTS_PER_OBSTACLE_EATEN = 5;
+        const POINTS_LENGTH_CUTTER = 10;
+        const COIN_REWARD_BONUS_POINTS = 100;
+        const COIN_TTL_MS = 10000; // 10s coin lifetime
+        // Weighted coin counts per food eat (weights sum to 80 → normalized implicitly)
+        const COIN_SPAWN_WEIGHTS = [
+            { count: 1, weight: 30 },
+            { count: 2, weight: 20 },
+            { count: 3, weight: 20 },
+            { count: 4, weight: 10 }
+        ];
+
+        const MIN_SNAKE_LENGTH = 3;
+        const COIN_COLLECTION_GOAL = 10;
+
+        const powerUpsEnabled = true;
+        const POWERUP_DESPAWN_FOOD_COUNT = 6;
+
+        const POWERUP_ITEM_SPAWN_INTERVAL = 8000;
+        const POWERUP_ITEM_SPAWN_CHANCE_PER_INTERVAL = 0.35;
+        let lastPowerUpItemSpawnAttempt = 0;
+        
+        // Obstacle Settings
+let obstaclesEnabled = false;
+const OBSTACLES_ENABLED_STORAGE_KEY = 'retroSnakeObstaclesEnabled_v1';
+// New tri-state mode: 0=OFF,1=CLASSIC,2=EXTREME
+let obstaclesMode = 0; // default OFF
+const OBSTACLES_MODE_STORAGE_KEY = 'retroSnakeObstaclesMode_v1';
+const OBSTACLE_MODE_OFF=0, OBSTACLE_MODE_CLASSIC=1, OBSTACLE_MODE_EXTREME=2;
+        const INITIAL_OBSTACLES_COUNT = 3;
+        const MAX_OBSTACLES = 8;
+        const OBSTACLE_GROWTH_FOOD_THRESHOLD = 2;
+        const OBSTACLE_CLEAR_CYCLE_FOOD_COUNT = 18;
+        // Game State Variables
+        let snake, foodItem, dx, dy, score;
+        let normalFoodEatenInGame = 0;
+        let activePowerUpItem = null;
+        let activeCoinItems = [];
+        let coinsCollectedThisGame = 0;
+        let snakeStatus = {
+            ghostMode: false, ghostModeEndTime: 0,
+            starMode: false, starModeEndTime: 0,
+            foodMagnetActive: false, foodMagnetActiveEndTime: 0
+        };
+        let obstaclesArray = [];
+        let foodEatenForObstacleGrowth = 0;
+        let foodEatenForObstacleClearCycle = 0;
+        // Combo System Variables
+        let comboCounter = 0;
+        let lastItemCollectionTime = 0;
+        const COMBO_TIMER_DURATION = 5000;
+
+        let totalFoodEatenInCurrentGame = 0;
+        let powerUpSpawnedThisThemeCycle = false;
+        let initialObstaclesSpawnedThisGame = false;
+        let gameStartTime = 0;
+        let powerUpsCollectedInGame = {};
+
+        let highScores = [];
+        const MAX_TOP_SCORES = 5; 
+        const HIGH_SCORES_BASE_KEY = 'retroSnakeTopScores_v10_';
+        // Game Loop Variables
+        let gameLoopAnimationId;
+        let lastFrameTime = 0;
+        let lastRenderTime = 0;
+        let gameUpdateAccumulator = 0;
+        let timeScoreAccumulator = 0;
+        let currentSnakeSpeed = 200;
+
+        let isGameOver, isGameRunning;
+        let isGameInitialized = false;
+        let isMessageBoxVisible = false;
+        let isSettingsMenuVisible = false;
+        let gameWasRunningBeforeMenu = false;
+        let isPaused = false;
+        // Easter Egg
+        let versionTapCount = 0;
+        let lastVersionTapTime = 0;
+        const EASTER_EGG_TAP_INTERVAL = 500;
+
+        // --- Input System Variables ---
+        const inputQueue = []; // Command Memory
+        const MAX_INPUT_QUEUE_LENGTH = 2;
+        // --- OPTIMIZATION VARIABLES ---
+        let iconCache = {}; // Cache for pre-rendered help menu icons
+        let activeIconCache = {}; // Cache for active powerups on the game board
+        let blockImageCache = {}; // Cache for pre-rendered styled blocks
+        
+        // --- Synthesized sound effects (Web Audio API — no files, no attribution needed) ---
+        let __sfxAudioCtx = null;
+        /* ============================================================
+           SECTION: AUDIO ENGINE — synthesized sound effects
+           All sound is generated with the Web Audio API. No files. Retune via the play*Sound helpers.
+           ============================================================ */
+        function getAudioCtx() {
+            try {
+                if (!__sfxAudioCtx) {
+                    const AC = window.AudioContext || window.webkitAudioContext;
+                    if (!AC) return null;
+                    __sfxAudioCtx = new AC();
+                }
+                if (__sfxAudioCtx.state === 'suspended') __sfxAudioCtx.resume();
+                return __sfxAudioCtx;
+            } catch (e) { return null; }
+        }
+        // One tone with an attack/decay envelope and an optional pitch glide.
+        function __sfxTone(freq, freqEnd, type, dur, vol, delay) {
+            const ctx = getAudioCtx();
+            if (!ctx) return;
+            const t0 = ctx.currentTime + (delay || 0);
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+            osc.type = type || 'square';
+            osc.frequency.setValueAtTime(freq, t0);
+            if (freqEnd && freqEnd !== freq) {
+                osc.frequency.exponentialRampToValueAtTime(Math.max(1, freqEnd), t0 + dur);
+            }
+            gain.gain.setValueAtTime(0.0001, t0);
+            gain.gain.exponentialRampToValueAtTime(vol, t0 + 0.006);
+            gain.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+            osc.connect(gain);
+            gain.connect(ctx.destination);
+            osc.start(t0);
+            osc.stop(t0 + dur + 0.03);
+        }
+        function playEatSound()     { __sfxTone(440, 760, 'square', 0.08, 0.16, 0); }
+        function playCoinSound()    { __sfxTone(988, 988, 'square', 0.07, 0.15, 0); __sfxTone(1319, 1319, 'square', 0.13, 0.15, 0.07); }
+        function playPowerupSound() { [523.25, 659.25, 783.99, 1046.5].forEach((f, i) => __sfxTone(f, f, 'triangle', 0.12, 0.15, i * 0.06)); }
+        function playClickSound()   { __sfxTone(300, 170, 'square', 0.05, 0.12, 0); }
+        function playGameOverSound(){ [392, 311.13, 261.63, 196].forEach((f, i) => __sfxTone(f, f, 'triangle', 0.22, 0.17, i * 0.13)); }
+
+        function playSfx(sfxId) {
+            if (!areSoundsEnabled) return;
+            switch (sfxId) {
+                case 'eat':      playEatSound();     break;
+                case 'coin':     playCoinSound();    break;
+                case 'powerup':  playPowerupSound(); break;
+                case 'click':    playClickSound();   break;
+                case 'gameover': playGameOverSound();break;
+            }
+        }
+        
+        function triggerHaptic(level = 'LIGHT') {
+  if (!isHapticsEnabled || !window.Capacitor) return;
+  try {
+    const H = window.Capacitor?.Plugins?.Haptics;
+    if (!H) return;
+
+    // Prefer enum if present; otherwise fall back to strings accepted by Capacitor
+    const Styles = H.ImpactStyle || { Light: 'LIGHT', Medium: 'MEDIUM', Heavy: 'HEAVY' };
+
+    const map = {
+      LIGHT:  Styles.Light,
+      MEDIUM: Styles.Medium,
+      HEAVY:  Styles.Heavy
+    };
+
+    if (typeof H.impact === 'function' && map[level]) {
+      H.impact({ style: map[level] });
+    } else if (typeof H.selectionStart === 'function') {
+      // Older plugin fallback (no style enum)
+      H.selectionStart(); H.selectionChanged?.(); H.selectionEnd?.();
+    } else if (typeof H.vibrate === 'function') {
+      H.vibrate();
+    }
+  } catch (e) {
+    // Fail silent so gameplay never breaks on haptics
+  }
+}
+
+
+        function updateSoundsButtonUI() {
+            toggleSoundsButton.textContent = `SOUNDS: ${areSoundsEnabled ? 'ON' : 'OFF'}`;
+        }
+
+        function toggleSounds() {
+            playSfx(sfxClick);
+            areSoundsEnabled = !areSoundsEnabled;
+            localStorage.setItem(SOUNDS_ENABLED_STORAGE_KEY, areSoundsEnabled);
+            updateSoundsButtonUI();
+        }
+
+        function updateHapticsButtonUI() {
+            toggleHapticsButton.textContent = `HAPTICS: ${isHapticsEnabled ? 'ON' : 'OFF'}`;
+        }
+        function toggleHaptics() {
+            playSfx(sfxClick);
+            isHapticsEnabled = !isHapticsEnabled;
+            localStorage.setItem(HAPTICS_ENABLED_STORAGE_KEY, isHapticsEnabled);
+            updateHapticsButtonUI();
+        }
+
+        function loadAudioHapticsSettings() {
+  const soundsStored = localStorage.getItem(SOUNDS_ENABLED_STORAGE_KEY);
+  areSoundsEnabled = soundsStored !== null ? (soundsStored === 'true') : true;
+  updateSoundsButtonUI();
+
+  const hapticsStored = localStorage.getItem(HAPTICS_ENABLED_STORAGE_KEY);
+  const pluginPresent = !!(window.Capacitor?.Plugins?.Haptics);
+  // Default ON only when a working Haptics plugin is present
+  isHapticsEnabled = hapticsStored !== null ? (hapticsStored === 'true') : pluginPresent;
+  updateHapticsButtonUI();
+}
+
+
+        function scaleSettingsMenuToGameScreen() {
+            const screenBorder = document.querySelector('.screen-border');
+            const bottomBar = document.getElementById('bottom-bar');
+            if (!settingsMenu || !screenBorder || !bottomBar) return;
+            settingsMenu.style.top = `${screenBorder.offsetTop}px`;
+            settingsMenu.style.transform = 'translateX(-50%)';
+            const availableHeight = (bottomBar.offsetTop + bottomBar.offsetHeight) - screenBorder.offsetTop;
+            settingsMenu.style.width = `${screenBorder.clientWidth * 0.95}px`;
+            settingsMenu.style.height = `${availableHeight}px`;
+        }
+
+        /* ============================================================
+           SECTION: LAYOUT, SCALING & HIGH-DPI CANVAS
+           Fits the phone to the viewport and sizes the canvas crisply for any device pixel ratio.
+           ============================================================ */
+        function scaleGameToFitScreen() {
+            if (!gameWrapper || !gameContainer) return;
+            const currentMode = screenModes[currentScreenModeIndex];
+            const selectedPhoneColor = phoneColors[currentPhoneColorIndex];
+            
+            if (currentMode === 'stretch') {
+                gameContainer.style.backgroundColor = selectedPhoneColor.style;
+                gameContainer.style.borderRadius = '20px';
+                gameWrapper.style.backgroundColor = 'transparent';
+                gameWrapper.style.boxShadow = 'none';
+            } else { // classic mode
+                gameContainer.style.backgroundColor = '#1a1a1a';
+                gameContainer.style.borderRadius = '0px';
+                gameWrapper.style.backgroundColor = selectedPhoneColor.style;
+                gameWrapper.style.boxShadow = '0 0 20px rgba(0,0,0,0.5), inset 0 0 10px rgba(0,0,0,0.3)';
+            }
+            
+            gameWrapper.style.transform = 'scale(1)';
+            const wrapperWidth = gameWrapper.offsetWidth;
+            const wrapperHeight = gameWrapper.offsetHeight;
+            const viewportWidth = gameContainer.clientWidth;
+            const viewportHeight = gameContainer.clientHeight;
+            const scaleX = viewportWidth / wrapperWidth;
+            const scaleY = viewportHeight / wrapperHeight;
+
+            const scale = Math.min(scaleX, scaleY);
+            gameWrapper.style.transform = `scale(${scale})`;
+            scaleSettingsMenuToGameScreen();
+        }
+
+        function resizeCanvasForDPR() {
+            const dpr = Math.max(1, window.devicePixelRatio || 1);
+            try {
+                const cssWidth  = (typeof tileCountX !== 'undefined' ? tileCountX : Math.round(canvas.clientWidth / gridSize)) * gridSize;
+                const cssHeight = (typeof tileCountY !== 'undefined' ? tileCountY : Math.round(canvas.clientHeight / gridSize)) * gridSize;
+                canvas.style.width  = cssWidth + 'px';
+                canvas.style.height = cssHeight + 'px';
+                canvas.width  = Math.round(cssWidth  * dpr);
+                canvas.height = Math.round(cssHeight * dpr);
+                ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+                snakeCanvas.width  = canvas.width;
+                snakeCanvas.height = canvas.height;
+                snakeCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+            } catch (e) {
+                const rect = canvas.getBoundingClientRect();
+                canvas.width = Math.round(rect.width * dpr);
+                canvas.height = Math.round(rect.height * dpr);
+                ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+                snakeCanvas.width = canvas.width;
+                snakeCanvas.height = canvas.height;
+                snakeCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+            }
+            if (typeof isGameInitialized !== 'undefined' && isGameInitialized && typeof drawGameOnDemand === 'function') {
+                drawGameOnDemand();
+            }
+        }
+
+
+        // --- Screen Orientation Lock (Capacitor) ---
+        const lockScreenOrientation = async () => {
+            try {
+                if (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.ScreenOrientation) {
+                    const { ScreenOrientation } = window.Capacitor.Plugins;
+                    await ScreenOrientation.lock({ orientation: 'portrait-primary' });
+                }
+            } catch (e) {
+                console.error('Error locking screen orientation:', e);
+            }
+        };
+
+        // Color Manipulation Helper Functions
+        function hexToRgb(hex) {
+            let r = 0, g = 0, b = 0;
+            if (hex.length === 4) {
+                r = parseInt(hex[1] + hex[1], 16);
+                g = parseInt(hex[2] + hex[2], 16);
+                b = parseInt(hex[3] + hex[3], 16);
+            } else if (hex.length === 7) {
+                r = parseInt(hex.substring(1, 3), 16);
+                g = parseInt(hex.substring(3, 5), 16);
+                b = parseInt(hex.substring(5, 7), 16);
+            }
+            return { r, g, b };
+        }
+        function rgbToHex(r, g, b) {
+            const compToHex = (c) => { const hexVal = c.toString(16);
+                return hexVal.length == 1 ? "0" + hexVal : hexVal; };
+            return "#" + compToHex(r) + compToHex(g) + compToHex(b);
+        }
+        function adjustColor(hex, percent) {
+            const { r, g, b } = hexToRgb(hex);
+            const amount = Math.floor(255 * (percent / 100));
+            const newR = Math.max(0, Math.min(255, r + amount));
+            const newG = Math.max(0, Math.min(255, g + amount));
+            const newB = Math.max(0, Math.min(255, b + amount));
+            return rgbToHex(newR, newG, newB);
+        }
+        function isColorLight(hexColor) {
+            const { r, g, b } = hexToRgb(hexColor);
+            const luminance = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+            return luminance > 128;
+        }
+
+        function setCanvasSize() {
+            canvas.width = tileCountX * gridSize;
+            canvas.height = tileCountY * gridSize;
+            snakeCanvas.width = canvas.width;
+            snakeCanvas.height = canvas.height;
+            const infoContainer = document.querySelector('.info-display-container');
+            if (infoContainer) infoContainer.style.maxWidth = `${canvas.width}px`;
+        }
+
+        // --- Unlockable Items Progress ---
+        /* ============================================================
+           SECTION: UNLOCK PROGRESSION
+           Tracks lifetime food eaten to unlock extra themes/skins/colors.
+           ============================================================ */
+        function loadUnlockProgress() {
+            const storedTotalFood = localStorage.getItem(TOTAL_FOOD_EATEN_OVERALL_STORAGE_KEY);
+            totalFoodEatenOverall = storedTotalFood ? parseInt(storedTotalFood) : 0;
+            playerUnlockLevel = totalFoodEatenOverall;
+            const storedNotified = localStorage.getItem(UNLOCKED_ITEMS_NOTIFIED_KEY);
+            unlockedItemsNotified = storedNotified ? JSON.parse(storedNotified) : {};
+        }
+        function saveUnlockProgress() {
+            localStorage.setItem(TOTAL_FOOD_EATEN_OVERALL_STORAGE_KEY, totalFoodEatenOverall.toString());
+            localStorage.setItem(UNLOCKED_ITEMS_NOTIFIED_KEY, JSON.stringify(unlockedItemsNotified));
+        }
+        function hasItemBeenUnlockedAndNotified(itemName) { return unlockedItemsNotified[itemName] === true;
+        }
+        function markItemAsNotified(itemName) { unlockedItemsNotified[itemName] = true;
+        }
+
+        // --- UI Effects ---
+        function triggerScoreFlash() {
+            if (window.__reduceMotion) { return; }
+            let flashCount = 0;
+            const maxFlashes = 3 * 2;
+            const flashInterval = setInterval(() => {
+                scoreDisplay.classList.toggle('score-flash');
+                flashCount++;
+                if (flashCount >= maxFlashes) {
+                    clearInterval(flashInterval);
+                    scoreDisplay.classList.remove('score-flash');
+                }
+            }, 150);
+        }
+
+        // --- Check and Queue New Unlocks ---
+        function checkAndQueueNewUnlocksIfThresholdMet() {
+            let anItemWasNewlyNotified = false;
+            for (const theme of gameThemes) {
+                if (theme.isNewUnlock && playerUnlockLevel >= theme.unlockLevelRequired && !hasItemBeenUnlockedAndNotified(theme.name)) {
+                    pendingUnlockNotificationsInSession.push({ name: theme.name, type: 'Game Theme' });
+                    triggerScoreFlash();
+                    markItemAsNotified(theme.name);
+                    anItemWasNewlyNotified = true;
+                }
+            }
+            for (const color of phoneColors) {
+                if (color.isNewUnlock && playerUnlockLevel >= color.unlockLevelRequired && !hasItemBeenUnlockedAndNotified(color.name)) {
+                    pendingUnlockNotificationsInSession.push({ name: color.name, type: 'Phone Color' });
+                    triggerScoreFlash();
+                    markItemAsNotified(color.name);
+                    anItemWasNewlyNotified = true;
+                }
+            }
+            for (const skin of snakeSkins) {
+                if (skin.isNewUnlock && playerUnlockLevel >= skin.unlockLevelRequired && !hasItemBeenUnlockedAndNotified(skin.name)) {
+                    pendingUnlockNotificationsInSession.push({ name: skin.name, type: 'Snake Skin' });
+                    triggerScoreFlash();
+                    markItemAsNotified(skin.name);
+                    anItemWasNewlyNotified = true;
+                }
+            }
+        }
+
+        // --- Difficulty Management ---
+        function loadDifficulty() {
+            const storedIndex = localStorage.getItem(DIFFICULTY_STORAGE_KEY);
+            currentDifficultyIndex = storedIndex !== null ? parseInt(storedIndex) : 1;
+            if (currentDifficultyIndex < 0 || currentDifficultyIndex >= difficultyLevels.length) { currentDifficultyIndex = 1;
+            }
+            updateCycleDifficultyButtonUI();
+        }
+        function saveDifficulty() { localStorage.setItem(DIFFICULTY_STORAGE_KEY, currentDifficultyIndex.toString());
+        }
+        function updateCycleDifficultyButtonUI() {
+            const difficultyKey = difficultyLevels[currentDifficultyIndex];
+            const setting = difficultySettings[difficultyKey];
+            cycleDifficultyButton.textContent = `DIFFICULTY: ${setting.label}`;
+            
+            difficultyLevels.forEach(level => cycleDifficultyButton.classList.remove(difficultySettings[level].colorClass));
+            cycleDifficultyButton.classList.remove('electric-text'); 
+            
+            if (difficultyKey === 'hard' || difficultyKey === 'very-hard') {
+                cycleDifficultyButton.classList.add('electric-text');
+            } else {
+                cycleDifficultyButton.classList.add(setting.colorClass);
+            }
+        }
+        /* ============================================================
+           SECTION: SETTINGS — selectors
+           Each button cycles an option and saves it; see the toggles section below for on/off settings.
+           ============================================================ */
+        function cycleDifficulty() { currentDifficultyIndex = (currentDifficultyIndex + 1) % difficultyLevels.length;
+            playSfx(sfxClick);
+            saveDifficulty();
+            updateCycleDifficultyButtonUI(); }
+
+        // --- Screen Mode Management ---
+        function loadScreenMode() {
+            const storedIndex = localStorage.getItem(SCREEN_MODE_STORAGE_KEY);
+            currentScreenModeIndex = storedIndex !== null ? parseInt(storedIndex) : 0;
+            if (currentScreenModeIndex < 0 || currentScreenModeIndex >= screenModes.length) {
+                currentScreenModeIndex = 0;
+            }
+            updateCycleScreenModeButtonUI();
+        }
+        function saveScreenMode() {
+            localStorage.setItem(SCREEN_MODE_STORAGE_KEY, currentScreenModeIndex.toString());
+        }
+        function updateCycleScreenModeButtonUI() {
+            const mode = screenModes[currentScreenModeIndex];
+            cycleScreenModeButton.textContent = `SCREEN MODE: ${mode.toUpperCase()}`;
+        }
+        function cycleScreenMode() {
+            playSfx(sfxClick);
+            currentScreenModeIndex = (currentScreenModeIndex + 1) % screenModes.length;
+            saveScreenMode();
+            updateCycleScreenModeButtonUI();
+            scaleGameToFitScreen();
+        }
+
+        function getAvailableItems(allItemsArray) { return allItemsArray.filter(item => playerUnlockLevel >= item.unlockLevelRequired);
+        }
+
+        // --- Game Theme Management ---
+        function loadGameTheme() {
+            const storedIndexStr = localStorage.getItem(GAME_THEME_STORAGE_KEY);
+            const availableGameThemes = getAvailableItems(gameThemes);
+            if (availableGameThemes.length === 0) { currentGameThemeIndex = 0;
+            }
+            else {
+                let targetThemeIndex = 0;
+                if (storedIndexStr !== null) {
+                    const storedFullIndex = parseInt(storedIndexStr);
+                    const storedTheme = gameThemes[storedFullIndex];
+                    if (storedTheme && availableGameThemes.some(t => t.name === storedTheme.name)) {
+                        targetThemeIndex = storedFullIndex;
+                    } else {
+                        targetThemeIndex = gameThemes.indexOf(availableGameThemes[0]);
+                    }
+                } else {
+                    targetThemeIndex = gameThemes.indexOf(availableGameThemes[0]);
+                }
+                currentGameThemeIndex = targetThemeIndex < 0 ? gameThemes.indexOf(availableGameThemes[0]) : targetThemeIndex;
+                if(currentGameThemeIndex < 0) currentGameThemeIndex = 0;
+            }
+            updateCycleGameThemeButtonUI();
+        }
+        function saveGameTheme() { localStorage.setItem(GAME_THEME_STORAGE_KEY, currentGameThemeIndex.toString());
+        }
+        function updateCycleGameThemeButtonUI() {
+            const currentThemeToDisplay = gameThemes[currentGameThemeIndex];
+            if (currentThemeToDisplay) {
+                 cycleGameThemeButton.textContent = `GAME THEME: ${currentThemeToDisplay.name.toUpperCase()}`;
+                 if (playerUnlockLevel >= currentThemeToDisplay.unlockLevelRequired) {
+                     cycleGameThemeButton.classList.remove('locked');
+                 } else {
+                     cycleGameThemeButton.textContent = `GAME THEME: ${currentThemeToDisplay.name.toUpperCase()} (LOCKED)`;
+                     cycleGameThemeButton.classList.add('locked');
+                 }
+            } else {
+                cycleGameThemeButton.textContent = 'GAME THEME: CLASSIC';
+                cycleGameThemeButton.classList.remove('locked');
+            }
+        }
+        function cycleGameTheme() {
+            playSfx(sfxClick);
+            const availableGameThemes = getAvailableItems(gameThemes);
+            if (availableGameThemes.length === 0) return;
+            let currentActualTheme = gameThemes[currentGameThemeIndex];
+            if (!currentActualTheme || !availableGameThemes.includes(currentActualTheme)) {
+                currentActualTheme = availableGameThemes[0];
+            }
+            let currentIndexInAvailable = availableGameThemes.indexOf(currentActualTheme);
+            currentIndexInAvailable = (currentIndexInAvailable + 1) % availableGameThemes.length;
+            currentGameThemeIndex = gameThemes.indexOf(availableGameThemes[currentIndexInAvailable]);
+            saveGameTheme(); updateCycleGameThemeButtonUI();
+            if (isGameInitialized && (!isGameRunning || isGameOver)) { drawGameOnDemand();
+            }
+        }
+
+        // --- Phone Color Management ---
+        function loadPhoneColor() {
+            const availablePhoneColors = getAvailableItems(phoneColors);
+            let determinedPhoneColorIndex = 0;
+            if (availablePhoneColors.length > 0) {
+                const storedIndexStr = localStorage.getItem(PHONE_COLOR_STORAGE_KEY);
+                if (storedIndexStr !== null) {
+                    const storedFullArrayIndex = parseInt(storedIndexStr);
+                    if (storedFullArrayIndex >= 0 && storedFullArrayIndex < phoneColors.length) {
+                        const storedColorCandidate = phoneColors[storedFullArrayIndex];
+                        if (playerUnlockLevel >= storedColorCandidate.unlockLevelRequired) {
+                            determinedPhoneColorIndex = storedFullArrayIndex;
+                        } else {
+                            const firstActuallyAvailable = phoneColors.find(pc => playerUnlockLevel >= pc.unlockLevelRequired);
+                            if (firstActuallyAvailable) { determinedPhoneColorIndex = phoneColors.indexOf(firstActuallyAvailable); }
+                        }
+                    } else {
+                        const firstActuallyAvailable = phoneColors.find(pc => playerUnlockLevel >= pc.unlockLevelRequired);
+                        if (firstActuallyAvailable) { determinedPhoneColorIndex = phoneColors.indexOf(firstActuallyAvailable); }
+                    }
+                } else {
+                    const firstActuallyAvailable = phoneColors.find(pc => playerUnlockLevel >= pc.unlockLevelRequired);
+                    if (firstActuallyAvailable) { determinedPhoneColorIndex = phoneColors.indexOf(firstActuallyAvailable); }
+                }
+            }
+            currentPhoneColorIndex = (determinedPhoneColorIndex >= 0 && determinedPhoneColorIndex < phoneColors.length) ? determinedPhoneColorIndex : 0;
+            applyPhoneColorAndInfoText();
+        }
+        function savePhoneColor() { localStorage.setItem(PHONE_COLOR_STORAGE_KEY, currentPhoneColorIndex.toString());
+        }
+        function applyPhoneColorAndInfoText() {
+            if (currentPhoneColorIndex < 0 || currentPhoneColorIndex >= phoneColors.length) { currentPhoneColorIndex = 0;
+            }
+            let selectedPhoneColor = phoneColors[currentPhoneColorIndex];
+            if (!selectedPhoneColor) {  currentPhoneColorIndex = 0; selectedPhoneColor = phoneColors[0];
+                if (!selectedPhoneColor) {
+                    gameWrapper.style.backgroundColor = '#4a5850';
+                    infoDisplay.style.color = '#1e2d24';
+                    updateCyclePhoneColorButtonUI();
+                    return;
+                }
+            }
+            
+            scaleGameToFitScreen();
+            if (infoDisplay) {
+                 let infoColor = selectedPhoneColor.infoTextColor;
+                 if (!infoColor) { infoColor = isColorLight(selectedPhoneColor.style) ? '#111111' : '#E0E0E0';
+                 }
+                 infoDisplay.style.color = infoColor;
+            }
+            updateCyclePhoneColorButtonUI();
+        }
+        function updateCyclePhoneColorButtonUI() {
+            const colorToShowOnButton = phoneColors[currentPhoneColorIndex];
+            if (colorToShowOnButton) {
+                 cyclePhoneColorButton.textContent = `PHONE COLOR: ${colorToShowOnButton.name.toUpperCase()}`;
+                 cyclePhoneColorButton.classList.remove('locked');
+            } else {
+                cyclePhoneColorButton.textContent = 'PHONE COLOR: OLIVE';
+                cyclePhoneColorButton.classList.remove('locked');
+            }
+        }
+        function cyclePhoneColor() {
+            playSfx(sfxClick);
+            const availablePhoneColors = getAvailableItems(phoneColors);
+            if (availablePhoneColors.length === 0) { return;
+            }
+            let currentValidColorObject = phoneColors[currentPhoneColorIndex];
+            if (!currentValidColorObject || !availablePhoneColors.includes(currentValidColorObject)) {
+                currentValidColorObject = availablePhoneColors[0];
+                if (!currentValidColorObject) { currentPhoneColorIndex = 0; applyPhoneColorAndInfoText(); savePhoneColor(); return; }
+            }
+            let currentIndexInAvailableList = availablePhoneColors.indexOf(currentValidColorObject);
+            let nextIndexInAvailableList = (currentIndexInAvailableList + 1) % availablePhoneColors.length;
+            const nextColorObjectFromAvailableList = availablePhoneColors[nextIndexInAvailableList];
+            const newIndexInFullList = phoneColors.indexOf(nextColorObjectFromAvailableList);
+            currentPhoneColorIndex = (newIndexInFullList === -1) ? 0 : newIndexInFullList;
+            applyPhoneColorAndInfoText(); savePhoneColor();
+        }
+
+        // --- Snake Skin Management ---
+        function loadSnakeSkin() {
+            const availableSnakeSkins = getAvailableItems(snakeSkins);
+            let determinedSkinIndex = 0;
+            if (availableSnakeSkins.length > 0) {
+                const storedIndexStr = localStorage.getItem(SNAKE_SKIN_STORAGE_KEY);
+                if (storedIndexStr !== null) {
+                    const storedFullArrayIndex = parseInt(storedIndexStr);
+                    if (storedFullArrayIndex >= 0 && storedFullArrayIndex < snakeSkins.length) {
+                        const storedSkinCandidate = snakeSkins[storedFullArrayIndex];
+                        if (playerUnlockLevel >= storedSkinCandidate.unlockLevelRequired) {
+                            determinedSkinIndex = storedFullArrayIndex;
+                        } else {
+                            const firstActuallyAvailable = snakeSkins.find(ss => playerUnlockLevel >= ss.unlockLevelRequired);
+                            if (firstActuallyAvailable) { determinedSkinIndex = snakeSkins.indexOf(firstActuallyAvailable); }
+                        }
+                    } else {
+                        const firstActuallyAvailable = snakeSkins.find(ss => playerUnlockLevel >= ss.unlockLevelRequired);
+                        if (firstActuallyAvailable) { determinedSkinIndex = snakeSkins.indexOf(firstActuallyAvailable); }
+                    }
+                } else {
+                    const firstActuallyAvailable = snakeSkins.find(ss => playerUnlockLevel >= ss.unlockLevelRequired);
+                    if (firstActuallyAvailable) { determinedSkinIndex = snakeSkins.indexOf(firstActuallyAvailable); }
+                }
+            }
+            currentSnakeSkinIndex = (determinedSkinIndex >= 0 && determinedSkinIndex < snakeSkins.length) ? determinedSkinIndex : 0;
+            updateCycleSnakeSkinButtonUI();
+        }
+        function saveSnakeSkin() { localStorage.setItem(SNAKE_SKIN_STORAGE_KEY, currentSnakeSkinIndex.toString());
+        }
+        function updateCycleSnakeSkinButtonUI() {
+            if (!cycleSnakeSkinButton) return;
+            const skinToShowOnButton = snakeSkins[currentSnakeSkinIndex];
+            if (skinToShowOnButton) {
+                cycleSnakeSkinButton.textContent = `SNAKE SKIN: ${skinToShowOnButton.name.toUpperCase()}`;
+                if (playerUnlockLevel >= skinToShowOnButton.unlockLevelRequired) {
+                    cycleSnakeSkinButton.classList.remove('locked');
+                } else {
+                    cycleSnakeSkinButton.textContent = `SNAKE SKIN: ${skinToShowOnButton.name.toUpperCase()} (LOCKED)`;
+                    cycleSnakeSkinButton.classList.add('locked');
+                }
+            } else {
+                cycleSnakeSkinButton.textContent = 'SNAKE SKIN: THEME';
+                cycleSnakeSkinButton.classList.remove('locked');
+            }
+        }
+        function cycleSnakeSkin() {
+            playSfx(sfxClick);
+            const availableSnakeSkins = getAvailableItems(snakeSkins);
+            if (availableSnakeSkins.length === 0) return;
+            let currentActualSkin = snakeSkins[currentSnakeSkinIndex];
+            if (!currentActualSkin || !availableSnakeSkins.includes(currentActualSkin)) {
+                currentActualSkin = availableSnakeSkins[0];
+            }
+            let currentIndexInAvailable = availableSnakeSkins.indexOf(currentActualSkin);
+            currentIndexInAvailable = (currentIndexInAvailable + 1) % availableSnakeSkins.length;
+            currentSnakeSkinIndex = snakeSkins.indexOf(availableSnakeSkins[currentIndexInAvailable]);
+            saveSnakeSkin();
+            updateCycleSnakeSkinButtonUI();
+            if (isGameInitialized && (!isGameRunning || isGameOver)) { drawGameOnDemand();
+            }
+        }
+
+        // --- D-Pad Style Management ---
+        function loadDPadStyle() {
+            const availableDPadStyles = getAvailableItems(dPadStyles);
+            let determinedStyleIndex = 0;
+            if (availableDPadStyles.length > 0) {
+                const storedIndexStr = localStorage.getItem(D_PAD_STYLE_STORAGE_KEY);
+                if (storedIndexStr !== null) {
+                    const storedFullArrayIndex = parseInt(storedIndexStr);
+                    if (storedFullArrayIndex >= 0 && storedFullArrayIndex < dPadStyles.length) {
+                        const storedStyleCandidate = dPadStyles[storedFullArrayIndex];
+                        if (playerUnlockLevel >= storedStyleCandidate.unlockLevelRequired) {
+                            determinedStyleIndex = storedFullArrayIndex;
+                        } else {
+                            const firstActuallyAvailable = dPadStyles.find(ds => playerUnlockLevel >= ds.unlockLevelRequired);
+                            if (firstActuallyAvailable) { determinedStyleIndex = dPadStyles.indexOf(firstActuallyAvailable); }
+                        }
+                    }
+                }
+            }
+            currentDPadStyleIndex = (determinedStyleIndex >= 0 && determinedStyleIndex < dPadStyles.length) ? determinedStyleIndex : 0;
+            applyDPadStyle();
+        }
+        function saveDPadStyle() { localStorage.setItem(D_PAD_STYLE_STORAGE_KEY, currentDPadStyleIndex.toString());
+        }
+        function applyDPadStyle() {
+            if (!dPadStyles[currentDPadStyleIndex]) return;
+            const newStyleClass = dPadStyles[currentDPadStyleIndex].class;
+            controlButtonElements.forEach(button => {
+                dPadStyles.forEach(style => {
+                    if (style.class !== D_PAD_STYLE_CLASSIC) {
+                         button.classList.remove(style.class);
+                    }
+                 });
+                if (newStyleClass !== D_PAD_STYLE_CLASSIC) {
+                    button.classList.add(newStyleClass);
+                }
+            });
+            updateCycleDPadStyleButtonUI();
+        }
+        function updateCycleDPadStyleButtonUI() {
+            if (!cycleDPadStyleButton) return;
+            const styleToShowOnButton = dPadStyles[currentDPadStyleIndex];
+            if (styleToShowOnButton) {
+                cycleDPadStyleButton.textContent = `D-PAD STYLE: ${styleToShowOnButton.name.toUpperCase()}`;
+                cycleDPadStyleButton.classList.remove('locked');
+            } else {
+                cycleDPadStyleButton.textContent = 'D-PAD STYLE: CLASSIC';
+            }
+        }
+        function cycleDPadStyle() {
+            playSfx(sfxClick);
+            if (cycleDPadStyleButton.classList.contains('locked')) return;
+            const availableDPadStyles = getAvailableItems(dPadStyles);
+            if (availableDPadStyles.length === 0) return;
+            let currentActualStyle = dPadStyles[currentDPadStyleIndex];
+            if (!currentActualStyle || !availableDPadStyles.includes(currentActualStyle)) {
+                currentActualStyle = availableDPadStyles[0];
+            }
+            let currentIndexInAvailable = availableDPadStyles.indexOf(currentActualStyle);
+            currentIndexInAvailable = (currentIndexInAvailable + 1) % availableDPadStyles.length;
+            currentDPadStyleIndex = dPadStyles.indexOf(availableDPadStyles[currentIndexInAvailable]);
+            saveDPadStyle();
+            applyDPadStyle();
+        }
+
+        // --- Graphics Mode Setting with Ultimate+ ---
+        function loadGraphicsMode() {
+            const storedModeName = localStorage.getItem(GRAPHICS_MODE_STORAGE_KEY);
+            const foundIndex = graphicsModes.findIndex(mode => mode.name === storedModeName);
+            currentGraphicsModeIndex = foundIndex !== -1 ? foundIndex : 0;
+            updateCycleGraphicsModeButtonUI();
+        }
+        function saveGraphicsMode() {
+            localStorage.setItem(GRAPHICS_MODE_STORAGE_KEY, graphicsModes[currentGraphicsModeIndex].name);
+        }
+        function updateCycleGraphicsModeButtonUI() {
+            const setting = graphicsModes[currentGraphicsModeIndex];
+            
+            if (window.__reduceMotion && setting.name === 'ULTIMATE+') { currentGraphicsModeIndex = (currentGraphicsModeIndex + 1) % graphicsModes.length; return updateCycleGraphicsModeButtonUI(); }
+            cycleGraphicsModeButton.classList.remove('battery-low', 'battery-medium', 'battery-high', 'battery-extreme', 'battery-ultimate-plus', 'electric-text');
+            
+            if (setting.name === 'ULTRA' || setting.name === 'ULTIMATE' || setting.name === 'ULTIMATE+') {
+                cycleGraphicsModeButton.classList.add('electric-text');
+            } 
+            
+            if(setting.battery) {
+                cycleGraphicsModeButton.classList.add(`battery-${setting.battery}`);
+            }
+            
+            const batteryIcon = (setting.battery === 'high' || setting.battery === 'extreme' || setting.battery === 'ultimate-plus') ? '🪫' : '🔋';
+            cycleGraphicsModeButton.innerHTML = `GRAPHICS: ${setting.name} ${batteryIcon}`;
+        }
+        function cycleGraphicsMode() {
+            playSfx(sfxClick);
+            currentGraphicsModeIndex = (currentGraphicsModeIndex + 1) % graphicsModes.length;
+                        if (window.__reduceMotion && graphicsModes[currentGraphicsModeIndex].name === 'ULTIMATE+') { currentGraphicsModeIndex = (currentGraphicsModeIndex + 1) % graphicsModes.length; }
+            saveGraphicsMode();
+            updateCycleGraphicsModeButtonUI();
+            blockImageCache = {}; 
+            if (isGameInitialized && (!isGameRunning || isGameOver)) {
+                drawGameOnDemand();
+            }
+        }
+
+        // --- FPS Limit Setting ---
+        function loadFpsLimit() {
+            const storedIndex = localStorage.getItem(FPS_LIMIT_STORAGE_KEY);
+            currentFpsLimitIndex = storedIndex !== null ? parseInt(storedIndex) : 1;
+            if (currentFpsLimitIndex < 0 || currentFpsLimitIndex >= fpsLimits.length) {
+                currentFpsLimitIndex = 1;
+            }
+            updateCycleFpsButtonUI();
+        }
+        function saveFpsLimit() {
+            localStorage.setItem(FPS_LIMIT_STORAGE_KEY, currentFpsLimitIndex.toString());
+        }
+        function updateCycleFpsButtonUI() {
+            const setting = fpsLimits[currentFpsLimitIndex];
+            cycleFpsLimitButton.classList.remove('battery-low', 'battery-medium', 'battery-high', 'electric-text');
+            
+            if (setting.value === 90) {
+                cycleFpsLimitButton.classList.add('electric-text');
+            } else {
+                if(setting.battery) {
+                    cycleFpsLimitButton.classList.add(`battery-${setting.battery}`);
+                }
+            }
+            
+            const batteryIcon = setting.battery === 'high' ? '🪫' : '🔋';
+            cycleFpsLimitButton.innerHTML = `FPS LIMIT: ${setting.value} ${batteryIcon}`;
+        }
+        function cycleFpsLimit() {
+            playSfx(sfxClick);
+            currentFpsLimitIndex = (currentFpsLimitIndex + 1) % fpsLimits.length;
+            saveFpsLimit();
+            updateCycleFpsButtonUI();
+        }
+
+        // --- Obstacles Enabled Setting ---
+        function loadObstaclesEnabledSetting() {
+            const storedValue = localStorage.getItem(OBSTACLES_ENABLED_STORAGE_KEY);
+            obstaclesEnabled = storedValue === null ? false : (storedValue === 'true');
+            updateObstaclesButtonUI();
+        }
+        function saveObstacleMode() { localStorage.setItem(OBSTACLES_ENABLED_STORAGE_KEY, obstaclesEnabled.toString()); }
+        function saveObstaclesMode(){ localStorage.setItem(OBSTACLES_MODE_STORAGE_KEY, String(obstaclesMode)); }
+                function updateObstaclesButtonUI() {
+            let label = 'OFF';
+            if (obstaclesMode === OBSTACLE_MODE_CLASSIC) label = 'ON (+50% PTS)';
+            else if (obstaclesMode === OBSTACLE_MODE_EXTREME) label = 'ON++ (+100% PTS)';
+            toggleObstaclesButton.textContent = `OBSTACLES: ${label}`;
+
+            if (obstaclesMode !== OBSTACLE_MODE_OFF) {
+                toggleObstaclesButton.classList.add('electric-text');
+            } else {
+                toggleObstaclesButton.classList.remove('electric-text');
+            }
+        }
+
+        function toggleObstacles() {
+            playSfx(sfxClick);
+            obstaclesMode = (obstaclesMode + 1) % 3; // OFF->CLASSIC->EXTREME
+            obstaclesEnabled = obstaclesMode !== OBSTACLE_MODE_OFF;
+            saveObstaclesMode(); 
+            updateObstaclesButtonUI();
+            if (!obstaclesEnabled && isGameRunning) {
+                clearAllObstacles();
+            }
+        }
+
+        /* ============================================================
+           SECTION: SETTINGS — toggles & expander
+           Walls, swipe, large fonts, keep-theme, and the Basic/Advanced menu expander (all persisted).
+           ============================================================ */
+        // --- No Walls (wrap-around) Setting ---
+        let wallsEnabled = true; // true = classic walls; false = wrap to the opposite edge
+        const WALLS_ENABLED_STORAGE_KEY = 'retroSnakeWallsEnabled_v1';
+        function loadWallsSetting() {
+            const stored = localStorage.getItem(WALLS_ENABLED_STORAGE_KEY);
+            wallsEnabled = stored === null ? true : (stored === 'true');
+            updateWallsButtonUI();
+        }
+        function saveWallsSetting() { localStorage.setItem(WALLS_ENABLED_STORAGE_KEY, wallsEnabled.toString()); }
+        function updateWallsButtonUI() {
+            if (!toggleWallsButton) return;
+            toggleWallsButton.textContent = `WALLS: ${wallsEnabled ? 'ON' : 'OFF (WRAP)'}`;
+            if (!wallsEnabled) { toggleWallsButton.classList.add('electric-text'); }
+            else { toggleWallsButton.classList.remove('electric-text'); }
+        }
+        function toggleWalls() {
+            playSfx(sfxClick);
+            wallsEnabled = !wallsEnabled;
+            saveWallsSetting();
+            updateWallsButtonUI();
+        }
+
+        // --- Swipe Controls Setting ---
+        let swipeEnabled = true;
+        const SWIPE_ENABLED_STORAGE_KEY = 'retroSnakeSwipeEnabled_v1';
+        function loadSwipeSetting() {
+            const stored = localStorage.getItem(SWIPE_ENABLED_STORAGE_KEY);
+            swipeEnabled = stored === null ? true : (stored === 'true');
+            updateSwipeButtonUI();
+        }
+        function saveSwipeSetting() { localStorage.setItem(SWIPE_ENABLED_STORAGE_KEY, swipeEnabled.toString()); }
+        function updateSwipeButtonUI() {
+            if (!toggleSwipeButton) return;
+            toggleSwipeButton.textContent = `SWIPE CONTROLS: ${swipeEnabled ? 'ON' : 'OFF'}`;
+            if (swipeEnabled) { toggleSwipeButton.classList.add('electric-text'); }
+            else { toggleSwipeButton.classList.remove('electric-text'); }
+        }
+        function toggleSwipe() {
+            playSfx(sfxClick);
+            swipeEnabled = !swipeEnabled;
+            saveSwipeSetting();
+            updateSwipeButtonUI();
+        }
+
+        // --- Large Fonts (accessibility) Setting ---
+        let largeFontsEnabled = false;
+        const LARGE_FONTS_STORAGE_KEY = 'retroSnakeLargeFonts_v1';
+        function applyLargeFonts() { document.body.classList.toggle('large-fonts', largeFontsEnabled); }
+        function loadLargeFontsSetting() {
+            const stored = localStorage.getItem(LARGE_FONTS_STORAGE_KEY);
+            largeFontsEnabled = stored === null ? false : (stored === 'true');
+            applyLargeFonts();
+            updateLargeFontsButtonUI();
+        }
+        function saveLargeFontsSetting() { localStorage.setItem(LARGE_FONTS_STORAGE_KEY, largeFontsEnabled.toString()); }
+        function updateLargeFontsButtonUI() {
+            if (!toggleLargeFontsButton) return;
+            toggleLargeFontsButton.textContent = `LARGE FONTS: ${largeFontsEnabled ? 'ON' : 'OFF'}`;
+            if (largeFontsEnabled) { toggleLargeFontsButton.classList.add('electric-text'); }
+            else { toggleLargeFontsButton.classList.remove('electric-text'); }
+        }
+        function toggleLargeFonts() {
+            playSfx(sfxClick);
+            largeFontsEnabled = !largeFontsEnabled;
+            applyLargeFonts();
+            saveLargeFontsSetting();
+            updateLargeFontsButtonUI();
+            if (typeof scaleGameToFitScreen === 'function') scaleGameToFitScreen();
+        }
+
+        // --- Keep Current Theme (lock auto-cycling) Setting ---
+        let keepThemeEnabled = true; // true = stay on the chosen theme; false = auto-rotate themes
+        const KEEP_THEME_STORAGE_KEY = 'retroSnakeKeepTheme_v1';
+        function loadKeepThemeSetting() {
+            const stored = localStorage.getItem(KEEP_THEME_STORAGE_KEY);
+            keepThemeEnabled = stored === null ? true : (stored === 'true');
+            updateKeepThemeButtonUI();
+        }
+        function saveKeepThemeSetting() { localStorage.setItem(KEEP_THEME_STORAGE_KEY, keepThemeEnabled.toString()); }
+        function updateKeepThemeButtonUI() {
+            if (!toggleKeepThemeButton) return;
+            toggleKeepThemeButton.textContent = `KEEP CURRENT THEME: ${keepThemeEnabled ? 'ON' : 'OFF'}`;
+            if (keepThemeEnabled) { toggleKeepThemeButton.classList.add('electric-text'); }
+            else { toggleKeepThemeButton.classList.remove('electric-text'); }
+        }
+        function toggleKeepTheme() {
+            playSfx(sfxClick);
+            keepThemeEnabled = !keepThemeEnabled;
+            saveKeepThemeSetting();
+            updateKeepThemeButtonUI();
+        }
+
+        // --- Basic / Advanced settings expander ---
+        let advancedOpen = false;
+        const ADVANCED_OPEN_STORAGE_KEY = 'retroSnakeAdvancedOpen_v1';
+        function applyAdvancedState() {
+            if (advancedSettings) advancedSettings.classList.toggle('open', advancedOpen);
+            if (advancedToggle) {
+                advancedToggle.classList.toggle('open', advancedOpen);
+                advancedToggle.setAttribute('aria-expanded', advancedOpen ? 'true' : 'false');
+            }
+        }
+        function loadAdvancedState() {
+            advancedOpen = localStorage.getItem(ADVANCED_OPEN_STORAGE_KEY) === 'true';
+            applyAdvancedState();
+        }
+        function toggleAdvanced() {
+            playSfx(sfxClick);
+            advancedOpen = !advancedOpen;
+            localStorage.setItem(ADVANCED_OPEN_STORAGE_KEY, advancedOpen.toString());
+            applyAdvancedState();
+            if (typeof scaleSettingsMenuToGameScreen === 'function') scaleSettingsMenuToGameScreen();
+        }
+
+        /* ============================================================
+           SECTION: CELEBRATION — new high score
+           Confetti + chime + banner when the player beats their best.
+           ============================================================ */
+        // --- New-high-score celebration ---
+        let gameStartBest = 0;        // the record to beat for this run
+        let newHighCelebrated = false; // fire the celebration only once per run
+        function playCelebrationChime() {
+            if (!areSoundsEnabled) return;
+            // C5-E5-G5-C6 rising arpeggio, via the shared Web Audio engine
+            [523.25, 659.25, 783.99, 1046.50].forEach((f, i) => __sfxTone(f, f, 'triangle', 0.18, 0.22, i * 0.09));
+        }
+        function spawnConfetti() {
+            const layer = document.getElementById('confetti-layer');
+            if (!layer) return;
+            layer.innerHTML = '';
+            const colors = ['#FFD54F', '#FF5252', '#4FC3F7', '#66BB6A', '#BA68C8', '#FFFFFF', '#FF7043'];
+            const count = 36;
+            for (let i = 0; i < count; i++) {
+                const p = document.createElement('div');
+                p.className = 'confetti-piece';
+                p.style.left = (Math.random() * 100) + 'vw';
+                p.style.backgroundColor = colors[i % colors.length];
+                p.style.animationDelay = (Math.random() * 0.4) + 's';
+                p.style.animationDuration = (1.6 + Math.random() * 1.0) + 's';
+                const size = 6 + Math.random() * 6;
+                p.style.width = size + 'px';
+                p.style.height = (size * 0.6) + 'px';
+                layer.appendChild(p);
+            }
+            setTimeout(() => { if (layer) layer.innerHTML = ''; }, 2800);
+        }
+        function showNewBestBanner() {
+            const b = document.createElement('div');
+            b.className = 'newbest-banner';
+            b.textContent = '\u2605 NEW BEST! \u2605';
+            document.body.appendChild(b);
+            setTimeout(() => { if (b && b.parentNode) b.parentNode.removeChild(b); }, 2000);
+        }
+        function celebrateNewHighScore(withBanner) {
+            playCelebrationChime();
+            spawnConfetti();
+            triggerHaptic('MEDIUM');
+            if (withBanner) showNewBestBanner();
+        }
+
+        /* ============================================================
+           SECTION: LIFETIME STATS
+           Persistent totals shown on the About screen.
+           ============================================================ */
+        // --- Lifetime Stats (persistent, shown on the About screen) ---
+        let lifetimeStats = { gamesPlayed: 0, longestSnake: 0, totalCoins: 0, bestCombo: 0, totalPlayMs: 0 };
+        const LIFETIME_STATS_STORAGE_KEY = 'retroSnakeLifetimeStats_v1';
+        let maxComboThisGame = 0;
+        let coinsCollectedThisGameTotal = 0;
+        function loadLifetimeStats() {
+            try {
+                const stored = localStorage.getItem(LIFETIME_STATS_STORAGE_KEY);
+                if (stored) {
+                    const p = JSON.parse(stored);
+                    lifetimeStats = {
+                        gamesPlayed: p.gamesPlayed || 0,
+                        longestSnake: p.longestSnake || 0,
+                        totalCoins: p.totalCoins || 0,
+                        bestCombo: p.bestCombo || 0,
+                        totalPlayMs: p.totalPlayMs || 0
+                    };
+                }
+            } catch (e) { /* keep defaults */ }
+        }
+        function saveLifetimeStats() {
+            try { localStorage.setItem(LIFETIME_STATS_STORAGE_KEY, JSON.stringify(lifetimeStats)); } catch (e) {}
+        }
+        function formatPlayTime(ms) {
+            const totalSec = Math.floor((ms || 0) / 1000);
+            const h = Math.floor(totalSec / 3600);
+            const m = Math.floor((totalSec % 3600) / 60);
+            const s = totalSec % 60;
+            if (h > 0) return `${h}h ${m}m`;
+            if (m > 0) return `${m}m ${s}s`;
+            return `${s}s`;
+        }
+        function getStatsPanelHTML() {
+            const rows = [
+                ['Games Played', lifetimeStats.gamesPlayed],
+                ['Longest Snake', lifetimeStats.longestSnake],
+                ['Best Combo', 'x' + lifetimeStats.bestCombo],
+                ['Coins Collected', lifetimeStats.totalCoins],
+                ['Food Eaten', totalFoodEatenOverall],
+                ['Time Played', formatPlayTime(lifetimeStats.totalPlayMs)]
+            ];
+            let html = '<div class="stats-panel">';
+            rows.forEach(r => { html += `<div class="stat-row"><span class="stat-label">${r[0]}</span><span class="stat-value">${r[1]}</span></div>`; });
+            html += '</div>';
+            return html;
+        }
+
+        /* ============================================================
+           SECTION: HIGH SCORES
+           Per-difficulty leaderboards saved in localStorage.
+           ============================================================ */
+        // High Score Management
+        function getCurrentHighScoreKey() { return HIGH_SCORES_BASE_KEY + difficultyLevels[currentDifficultyIndex];
+        }
+        function loadHighScores() {
+            const highScoreKey = getCurrentHighScoreKey();
+            const storedScores = localStorage.getItem(highScoreKey);
+            highScores = storedScores ? JSON.parse(storedScores) : [];
+            if (!Array.isArray(highScores)) highScores = [];
+            highScores.sort((a, b) => b - a);
+            updateCurrentHighScoreDisplay();
+        }
+        function saveHighScores() { const highScoreKey = getCurrentHighScoreKey();
+            localStorage.setItem(highScoreKey, JSON.stringify(highScores)); }
+        function addScoreToHighScores(newScore) {
+            if (newScore < 0) return;
+            highScores.push(newScore);
+            highScores.sort((a, b) => b - a);
+            highScores = highScores.slice(0, MAX_TOP_SCORES);
+            saveHighScores();
+            updateCurrentHighScoreDisplay();
+        }
+        function updateCurrentHighScoreDisplay() { 
+            // This function is now empty as the display element was removed,
+            // but we keep the function in case it's needed for other UI in the future.
+            // highScoreDisplayElement.textContent = `HI: ${highScores.length > 0 ? highScores[0] : 0}`;
+        }
+
+        /* ============================================================
+           SECTION: GAME SETUP — initGame
+           Resets all per-round state to a fresh start (does not begin the loop).
+           ============================================================ */
+        function initGame() {
+            isGameOver = false;
+            isGameRunning = false;
+            score = 0;
+            totalFoodEatenInCurrentGame = 0;
+            normalFoodEatenInGame = 0;
+            foodEatenForThemeCycle = 0;
+            
+            pendingUnlockNotificationsInSession = [];
+            comboCounter = 0;
+            lastItemCollectionTime = 0;
+            maxComboThisGame = 0;
+            coinsCollectedThisGameTotal = 0;
+            activeCoinItems = [];
+            coinsCollectedThisGame = 0;
+            snakeStatus.ghostMode = false;
+            snakeStatus.ghostModeEndTime = 0;
+            snakeStatus.starMode = false;
+            snakeStatus.starModeEndTime = 0;
+            snakeStatus.foodMagnetActive = false;
+            snakeStatus.foodMagnetActiveEndTime = 0;
+            updateStatusDisplay();
+            activePowerUpItem = null;
+            lastPowerUpItemSpawnAttempt = Date.now();
+            obstaclesArray = [];
+            foodEatenForObstacleGrowth = 0;
+            foodEatenForObstacleClearCycle = 0;
+            initialObstaclesSpawnedThisGame = false;
+            gameStartTime = Date.now();
+            powerUpsCollectedInGame = {};
+            const diffConfig = difficultySettings[difficultyLevels[currentDifficultyIndex]];
+            currentSnakeSpeed = diffConfig.initialSpeed;
+            clearAllObstacles();
+            snake = [
+                { x: Math.floor(tileCountX / 2), y: Math.floor(tileCountY / 2) },
+                { x: Math.floor(tileCountX / 2) - 1, y: Math.floor(tileCountY / 2) },
+                { x: Math.floor(tileCountX / 2) - 2, y: Math.floor(tileCountY / 2) }
+            ];
+            dx = 1;
+            dy = 0;
+            inputQueue.length = 0;
+            foodItem = { x: 0, y: 0, type: FOOD_TYPE_NORMAL };
+            loadHighScores();
+            gameStartBest = (highScores && highScores.length) ? highScores[0] : 0;
+            newHighCelebrated = false;
+            placeNormalFood();
+            updateScoreDisplay();
+            hideSettingsMenuVisually();
+            hideMessageBox();
+            isPaused = false;
+            hidePauseOverlay();
+            startRestartButton.innerHTML = START_ICON;
+            gameUpdateAccumulator = 0;
+            timeScoreAccumulator = 0;
+            if (!isGameInitialized) {
+                isGameInitialized = true;
+            }
+            
+            redrawSnakeCanvas();
+            drawGameOnDemand();
+        }
+
+        /* ============================================================
+           SECTION: RENDERING — one frame
+           Clears + draws board, food, coins, power-ups, then blits the snake's offscreen canvas.
+           ============================================================ */
+        function renderFrame() {
+            clearCanvas();
+            drawObstacles();
+            drawNormalFoodOnCanvas();
+            drawCoinsOnCanvas();
+            drawActivePowerUp();
+
+            if (snakeStatus.starMode) {
+                drawStarPowerSnake();
+            } else {
+                if (snakeStatus.ghostMode) {
+                    ctx.globalAlpha = 0.4;
+                }
+                // Blit the offscreen snake. IMPORTANT: pass the *logical* size (not bare 0,0).
+                // The main ctx already carries a devicePixelRatio scale, so drawing at the
+                // logical board size keeps the snake crisp and correctly placed on any density.
+                // Dropping the width/height args reintroduces a high-DPI scaling bug.
+                ctx.drawImage(snakeCanvas, 0, 0, tileCountX * gridSize, tileCountY * gridSize);
+                ctx.globalAlpha = 1.0; // Reset alpha
+            }
+
+            if (graphicsModes[currentGraphicsModeIndex].name === 'ULTIMATE+' && !window.__reduceMotion) {
+                drawUltimatePlusEffects();
+            }
+        }
+
+        
+        function updateGameLogic() {
+            if (isGameOver || !isGameRunning || isSettingsMenuVisible || isMessageBoxVisible) { return;
+            }
+
+            if (inputQueue.length > 0) {
+                const nextMove = inputQueue[0];
+                const isReverseHorizontal = dx !== 0 && nextMove.dx === -dx;
+                const isReverseVertical = dy !== 0 && nextMove.dy === -dy;
+                if (!isReverseHorizontal && !isReverseVertical) {
+                    dx = nextMove.dx;
+                    dy = nextMove.dy;
+                    inputQueue.shift();
+                }
+            }
+
+            // Pre-move magnet snap to ensure immediate pickup (fixes 'chasing' bug)
+            applyMagnetSnapPreMove();
+            
+            moveSnake(); 
+            if (!snakeStatus.starMode) {
+                redrawSnakeCanvas(); 
+            }
+            updateStatusAndPowerups();
+            attemptPowerupSpawn();
+            checkCollisions();
+        }
+
+        /* ============================================================
+           SECTION: GAME LOOP — fixed timestep
+           rAF-driven; uses an accumulator so snake speed is frame-rate independent.
+           ============================================================ */
+        function mainGameLoop(currentTime) {
+            gameLoopAnimationId = requestAnimationFrame(mainGameLoop);
+            const fpsLimit = fpsLimits[currentFpsLimitIndex].value;
+            const frameInterval = 1000 / fpsLimit;
+            const elapsedSinceLastRender = currentTime - lastRenderTime;
+            if (elapsedSinceLastRender > frameInterval) {
+                lastRenderTime = currentTime - (elapsedSinceLastRender % frameInterval);
+                if (isGameOver || isSettingsMenuVisible || isMessageBoxVisible || isPaused) {
+                    // Paused
+                } else if (isGameRunning) {
+                    const deltaTime = currentTime - lastFrameTime;
+                    lastFrameTime = currentTime;
+
+                    // Time-based scoring logic
+                    timeScoreAccumulator += deltaTime;
+                    if (timeScoreAccumulator >= 1000) {
+                        const secondsPassed = Math.floor(timeScoreAccumulator / 1000);
+                        const timePoints = secondsPassed * 2; // 2 points per second
+                        addPoints(timePoints, true); // Add points (comboable)
+                        updateScoreDisplay(); // Update the display immediately
+                        timeScoreAccumulator -= secondsPassed * 1000; // Subtract processed time
+                    }
+
+                    // Fixed-timestep update: advance one logical step every `currentSnakeSpeed`
+                    // milliseconds regardless of frame rate, so the snake moves at the same pace
+                    // on a 60Hz or 144Hz screen. Lower currentSnakeSpeed = faster snake.
+                    gameUpdateAccumulator += deltaTime;
+                    while (gameUpdateAccumulator >= currentSnakeSpeed) {
+                        updateGameLogic();
+                        gameUpdateAccumulator -= currentSnakeSpeed;
+                        if (isGameOver) break;
+                    }
+                } else {
+                    lastFrameTime = currentTime;
+                }
+                renderFrame();
+            }
+        }
+
+        /* ============================================================
+           SECTION: GAME START / RESUME
+           Begins (or restarts) play and (re)starts the loop with fresh timing.
+           ============================================================ */
+        function startGame() {
+            if (isGameOver) {
+                initGame();
+            }
+            isGameRunning = true;
+            isGameOver = false;
+            isPaused = false;
+            hidePauseOverlay();
+            hideSettingsMenuVisually();
+            hideMessageBox();
+            startRestartButton.innerHTML = PAUSE_ICON;
+            lastFrameTime = performance.now();
+            lastRenderTime = lastFrameTime;
+            gameUpdateAccumulator = 0;
+            if (gameLoopAnimationId) {
+                cancelAnimationFrame(gameLoopAnimationId);
+            }
+            gameLoopAnimationId = requestAnimationFrame(mainGameLoop);
+        }
+
+        // --- Drawing Functions for Icons ---
+        function drawNormalFoodIcon(x, y, size) {
+            const sO = Math.max(1, Math.floor(size / 10));
+            ctx.fillStyle = "rgba(0,0,0,0.2)";
+            ctx.fillRect(x - size/2 + sO, y - size/2 + sO, size - sO, size - sO);
+            ctx.fillStyle = UNIQUE_FOOD_GREEN;
+            ctx.fillRect(x - size/2, y - size/2, size - sO, size - sO);
+            ctx.strokeStyle = UNIQUE_FOOD_GREEN_BORDER;
+            ctx.lineWidth = Math.max(1, Math.floor(size / 12));
+            ctx.strokeRect(x - size/2 + ctx.lineWidth/2, y - size/2 + ctx.lineWidth/2, size - sO - ctx.lineWidth, size - sO - ctx.lineWidth);
+        }
+
+        function drawGhostIcon(x, y, size) {
+            ctx.fillStyle = 'rgba(224, 224, 224, 0.8)';
+            ctx.beginPath();
+            ctx.arc(x, y, size * 0.35, Math.PI, 0);
+            ctx.lineTo(x + size * 0.35, y + size * 0.25);
+            ctx.quadraticCurveTo(x + size * 0.2, y + size * 0.4, x, y + size * 0.25);
+            ctx.quadraticCurveTo(x - size * 0.2, y + size * 0.4, x - size * 0.35, y + size * 0.25);
+            ctx.closePath();
+            ctx.fill();
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+            ctx.beginPath();
+            ctx.arc(x - size * 0.12, y - size * 0.05, size * 0.07, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.beginPath();
+            ctx.arc(x + size * 0.12, y - size * 0.05, size * 0.07, 0, Math.PI * 2);
+            ctx.fill();
+        }
+
+        function drawMagnetIconV2(ctx, x, y, size) {
+            ctx.save();
+            const magnetWidth = size * 0.6;
+            const magnetHeight = size * 0.5;
+            const thickness = size * 0.2;
+            const cornerRadius = size * 0.1;
+
+            const glowPulse = (Math.sin(Date.now() / 250) + 1) / 2;
+            const glowRadius = size * 0.5 + glowPulse * 4;
+            const glowAlpha = 0.2 + glowPulse * 0.3;
+            const glowGradient = ctx.createRadialGradient(x, y, 0, x, y, glowRadius);
+            glowGradient.addColorStop(0, `rgba(180, 200, 255, ${glowAlpha})`);
+            glowGradient.addColorStop(1, `rgba(180, 200, 255, 0)`);
+            ctx.fillStyle = glowGradient;
+            ctx.fillRect(x - size / 2, y - size / 2, size, size);
+
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
+            ctx.beginPath();
+            ctx.moveTo(x - magnetWidth / 2 + cornerRadius, y + magnetHeight / 2 + 2);
+            ctx.lineTo(x + magnetWidth / 2 - cornerRadius, y + magnetHeight / 2 + 2);
+            ctx.arcTo(x + magnetWidth / 2, y + magnetHeight / 2 + 2, x + magnetWidth / 2, y + magnetHeight / 2 - cornerRadius + 2, cornerRadius);
+            ctx.lineTo(x + magnetWidth / 2, y - magnetHeight / 2 + cornerRadius + 2);
+            ctx.fill();
+
+            ctx.fillStyle = '#E74C3C';
+            ctx.strokeStyle = '#A02C2C';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(x - magnetWidth / 2 + thickness, y - magnetHeight / 2);
+            ctx.lineTo(x - magnetWidth / 2, y - magnetHeight / 2);
+            ctx.lineTo(x - magnetWidth / 2, y + magnetHeight / 2 - cornerRadius);
+            ctx.arcTo(x - magnetWidth / 2, y + magnetHeight / 2, x - magnetWidth / 2 + cornerRadius, y + magnetHeight / 2, cornerRadius);
+            ctx.lineTo(x, y + magnetHeight / 2);
+            ctx.lineTo(x, y + magnetHeight / 2 - thickness);
+            ctx.arcTo(x - magnetWidth / 2 + cornerRadius, y + magnetHeight / 2 - thickness, x - magnetWidth / 2 + thickness, y + magnetHeight / 2 - cornerRadius - thickness, cornerRadius - 1);
+            ctx.lineTo(x - magnetWidth / 2 + thickness, y - magnetHeight / 2);
+            ctx.closePath();
+            ctx.fill();
+            ctx.stroke();
+
+            ctx.fillStyle = '#3498DB';
+            ctx.strokeStyle = '#256794';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(x + magnetWidth / 2 - thickness, y - magnetHeight / 2);
+            ctx.lineTo(x + magnetWidth / 2, y - magnetHeight / 2);
+            ctx.lineTo(x + magnetWidth / 2, y + magnetHeight / 2 - cornerRadius);
+            ctx.arcTo(x + magnetWidth / 2, y + magnetHeight / 2, x + magnetWidth / 2 - cornerRadius, y + magnetHeight / 2, cornerRadius);
+            ctx.lineTo(x, y + magnetHeight / 2);
+            ctx.lineTo(x, y + magnetHeight / 2 - thickness);
+            ctx.arcTo(x + magnetWidth / 2 - cornerRadius, y + magnetHeight / 2 - thickness, x + magnetWidth / 2 - thickness, y + magnetHeight / 2 - cornerRadius - thickness, cornerRadius - 1);
+            ctx.lineTo(x + magnetWidth / 2 - thickness, y - magnetHeight / 2);
+            ctx.closePath();
+            ctx.fill();
+            ctx.stroke();
+
+            ctx.restore();
+        }
+
+        function drawStarIcon(x, y, size) {
+            const outerRadius = size * 0.4;
+            const innerRadius = size * 0.18;
+            ctx.fillStyle = '#FFD700';
+            ctx.strokeStyle = '#FFA500';
+            ctx.lineWidth = Math.max(1, size * 0.05);
+            ctx.beginPath();
+            for (let i = 0; i < 5; i++) {
+                ctx.lineTo(x + Math.cos((18 + i * 72) * Math.PI / 180) * outerRadius, y + Math.sin((18 + i * 72) * Math.PI / 180) * outerRadius);
+                ctx.lineTo(x + Math.cos((54 + i * 72) * Math.PI / 180) * innerRadius, y + Math.sin((54 + i * 72) * Math.PI / 180) * innerRadius);
+            }
+            ctx.closePath();
+            ctx.fill();
+            ctx.stroke();
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
+            ctx.beginPath();
+            ctx.arc(x - outerRadius * 0.3, y - outerRadius * 0.3, size * 0.05, 0, Math.PI*2);
+            ctx.fill();
+        }
+
+        function drawShinySteelObstacle(ctx, x, y, size = 20) {
+            const gradient = ctx.createLinearGradient(x, y, x + size, y + size);
+            gradient.addColorStop(0, '#dfe4ea');
+            gradient.addColorStop(0.3, '#a4b0be');
+            gradient.addColorStop(0.6, '#57606f');
+            gradient.addColorStop(1, '#2f3542');
+            ctx.fillStyle = gradient;
+            ctx.fillRect(x, y, size, size);
+            const shineGradient = ctx.createRadialGradient(
+                x + size * 0.3, y + size * 0.3, 1,
+                x + size * 0.3, y + size * 0.3, size * 0.8
+            );
+            shineGradient.addColorStop(0, 'rgba(255,255,255,0.3)');
+            shineGradient.addColorStop(1, 'rgba(255,255,255,0)');
+            ctx.fillStyle = shineGradient;
+            ctx.fillRect(x, y, size, size);
+        }
+        
+        function drawLengthCutterIconV2(ctx, x, y, size) {
+            ctx.save();
+            const handleSize = size * 0.25;
+            const bladeLength = size * 0.8;
+            const bladeWidth = size * 0.2;
+
+            ctx.fillStyle = '#4A4A4A';
+            ctx.strokeStyle = '#202020';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.arc(x, y + size * 0.2, handleSize, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.stroke();
+
+            const bladeGradient = ctx.createLinearGradient(x, y, x, y - bladeLength);
+            bladeGradient.addColorStop(0, '#A0A0A0');
+            bladeGradient.addColorStop(0.5, '#F0F0F0');
+            bladeGradient.addColorStop(1, '#C0C0C0');
+
+            ctx.fillStyle = bladeGradient;
+            ctx.strokeStyle = '#606060';
+            ctx.beginPath();
+            ctx.moveTo(x, y);
+            ctx.lineTo(x - bladeWidth / 2, y - bladeLength * 0.2);
+            ctx.lineTo(x, y - bladeLength);
+            ctx.lineTo(x + bladeWidth / 2, y - bladeLength * 0.2);
+            ctx.closePath();
+            ctx.fill();
+            ctx.stroke();
+
+            const shimmerPulse = (Date.now() / 200) % (bladeLength * 1.5) - (bladeLength * 0.25);
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.6)';
+            ctx.beginPath();
+            ctx.moveTo(x - bladeWidth / 2, y - shimmerPulse);
+            ctx.lineTo(x + bladeWidth / 2, y - shimmerPulse);
+            ctx.lineTo(x + bladeWidth / 2, y - shimmerPulse - size * 0.08);
+            ctx.lineTo(x - bladeWidth / 2, y - shimmerPulse - size * 0.08);
+            ctx.closePath();
+            ctx.fill();
+
+            ctx.restore();
+        }
+
+        function drawCoinIcon(x, y, size) {
+            ctx.save();
+            const outlineWidth = Math.max(1, Math.floor(size / 15));
+            const mainCoinColor = '#FFD700';
+            const shadowCoinColor = '#DAA520';
+            const highlightCoinColor = '#FFFFE0';
+            const darkOutlineColor = '#A07000';
+            ctx.fillStyle = darkOutlineColor;
+            ctx.beginPath();
+            ctx.arc(x, y + outlineWidth / 2, size * 0.4, 0, Math.PI * 2);
+            ctx.fill();
+            const gradient = ctx.createRadialGradient(x - size * 0.05, y - size * 0.05, size * 0.05, x, y, size * 0.4);
+            gradient.addColorStop(0, highlightCoinColor);
+            gradient.addColorStop(0.6, mainCoinColor);
+            gradient.addColorStop(1, shadowCoinColor);
+            ctx.fillStyle = gradient;
+            ctx.beginPath();
+            ctx.arc(x, y, size * 0.4, 0, Math.PI * 2);
+            ctx.fill();
+            const starOuterRadius = size * 0.18;
+            const starInnerRadius = size * 0.07;
+            ctx.fillStyle = shadowCoinColor;
+            ctx.beginPath();
+            for (let i = 0; i < 5; i++) {
+                ctx.lineTo(x + Math.cos((18 + i * 72) * Math.PI / 180) * starOuterRadius, y + Math.sin((18 + i * 72) * Math.PI / 180) * starOuterRadius);
+                ctx.lineTo(x + Math.cos((54 + i * 72) * Math.PI / 180) * starInnerRadius, y + Math.sin((54 + i * 72) * Math.PI / 180) * starInnerRadius);
+            }
+            ctx.closePath();
+            ctx.fill();
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
+            ctx.beginPath();
+            ctx.ellipse(x - size * 0.15, y - size * 0.15, size * 0.1, size * 0.06, -Math.PI / 4, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.restore();
+        }
+
+        // --- Main Drawing Functions ---
+        /* ============================================================
+           SECTION: RENDERING HELPERS
+           Beveled blocks + the food/coin/power-up icon drawing.
+           ============================================================ */
+        function drawStyledBlock(targetCtx, xGrid, yGrid, size, fillColor) {
+            const blockX = xGrid * size;
+            const blockY = yGrid * size;
+            const currentGraphicsMode = graphicsModes[currentGraphicsModeIndex].name;
+            
+            if (currentGraphicsMode === 'PERFORMANCE') {
+                if (fillColor) { targetCtx.fillStyle = fillColor;
+                    targetCtx.fillRect(blockX, blockY, size, size); }
+                return;
+            }
+
+            if (fillColor && blockImageCache[fillColor]) {
+                targetCtx.drawImage(blockImageCache[fillColor], blockX, blockY);
+                if (!window.__reduceMotion && currentGraphicsMode.includes('ULTIMATE')) {
+                    const time = Date.now();
+                    const shimmerAlpha = (Math.sin(time / 400 + (blockX + blockY) / (size * 2)) + 1) / 2 * 0.15 + 0.05;
+                    targetCtx.fillStyle = `rgba(255, 255, 255, ${shimmerAlpha})`;
+                    const innerBevelSize = Math.max(1, Math.floor(size / 9));
+                    targetCtx.fillRect(blockX + innerBevelSize + 1, blockY + innerBevelSize + 1, size - (innerBevelSize + 1) * 2, size - (innerBevelSize + 1) * 2);
+                }
+                return;
+            }
+            
+            if (fillColor) {
+                const tempCanvas = document.createElement('canvas');
+                tempCanvas.width = size;
+                tempCanvas.height = size;
+                const tempCtx = tempCanvas.getContext('2d');
+                
+                const colors = {
+                    main: fillColor,
+                    shadow1: adjustColor(fillColor, -20),
+                    shadow2: adjustColor(fillColor, -40),
+                    highlight: adjustColor(fillColor, 10),
+                    highlight2: adjustColor(fillColor, 15)
+                };
+
+                let bevelSize = Math.max(1, Math.floor(size / 8));
+                let innerBevelSize = Math.max(1, Math.floor(size / 12));
+
+                if (currentGraphicsMode.includes('ULTRA') || currentGraphicsMode.includes('ULTIMATE')) {
+                    bevelSize = Math.max(1, Math.floor(size / 6));
+                    innerBevelSize = Math.max(1, Math.floor(size / 9));
+                    const gradient = tempCtx.createLinearGradient(0, 0, size, size);
+                    gradient.addColorStop(0, adjustColor(fillColor, 5));
+                    gradient.addColorStop(1, adjustColor(fillColor, -5));
+                    tempCtx.fillStyle = gradient;
+                    tempCtx.fillRect(0, 0, size, size);
+                } else { // Quality Mode
+                    tempCtx.fillStyle = colors.main;
+                    tempCtx.fillRect(0, 0, size, size);
+                }
+
+                tempCtx.fillStyle = colors.shadow1;
+                tempCtx.beginPath(); tempCtx.moveTo(size - bevelSize, bevelSize); tempCtx.lineTo(size, 0);
+                tempCtx.lineTo(size, size); tempCtx.lineTo(size - bevelSize, size - bevelSize); tempCtx.closePath(); tempCtx.fill();
+                tempCtx.fillStyle = colors.shadow2;
+                tempCtx.beginPath(); tempCtx.moveTo(bevelSize, size - bevelSize); tempCtx.lineTo(0, size);
+                tempCtx.lineTo(size, size); tempCtx.lineTo(size - bevelSize, size - bevelSize); tempCtx.closePath(); tempCtx.fill();
+                tempCtx.fillStyle = colors.highlight;
+                tempCtx.fillRect(0, 0, bevelSize, size); tempCtx.fillRect(bevelSize, 0, size - bevelSize, bevelSize);
+                tempCtx.fillStyle = colors.highlight2;
+                tempCtx.fillRect(innerBevelSize, innerBevelSize, size - innerBevelSize * 2, size - innerBevelSize * 2);
+                tempCtx.fillStyle = colors.main;
+                tempCtx.fillRect(innerBevelSize + 1, innerBevelSize + 1, size - (innerBevelSize + 1) * 2, size - (innerBevelSize + 1) * 2);
+
+                blockImageCache[fillColor] = tempCanvas;
+                drawStyledBlock(targetCtx, xGrid, yGrid, size, fillColor);
+            }
+        }
+
+        // --- REFACTORED: Master function to draw the snake to the offscreen canvas ---
+        function redrawSnakeCanvas() {
+            snakeCtx.clearRect(0, 0, snakeCanvas.width, snakeCanvas.height);
+            
+            const currentSkin = snakeSkins[currentSnakeSkinIndex];
+            let headColorToUse, bodyPatternType, bodyPatternColors;
+
+            if (currentSkin && currentSkin.patternType === 'theme_default') {
+                const snakeTheme = gameThemes[currentGameThemeIndex];
+                headColorToUse = snakeTheme.snakeHead;
+                bodyPatternType = 'solid';
+                bodyPatternColors = [snakeTheme.snakeBody];
+            } else {
+                headColorToUse = currentSkin.headColor;
+                bodyPatternType = currentSkin.patternType;
+                bodyPatternColors = currentSkin.bodyPattern;
+            }
+
+            snake.forEach((segment, index) => {
+                let segmentColor;
+                if (index === 0) {
+                    segmentColor = headColorToUse;
+                } else {
+                    switch (bodyPatternType) {
+                        case 'alternating':
+                        case 'striped_thin':
+                            segmentColor = bodyPatternColors[(index - 1) % bodyPatternColors.length];
+                            break;
+                        case 'solid_body_only':
+                        case 'solid':
+                        default:
+                            segmentColor = bodyPatternColors[0];
+                            break;
+                    }
+                }
+                drawStyledBlock(snakeCtx, segment.x, segment.y, gridSize, segmentColor);
+            });
+        }
+        
+        // --- NEW: Function to draw the snake directly for Star Power effect ---
+        function drawStarPowerSnake() {
+            const starColors = ['#FF0000', '#FF7F00', '#FFFF00', '#00FF00', '#0000FF', '#4B0082', '#9400D3'];
+            snake.forEach((segment, index) => {
+                const segmentColor = (window.__reduceMotion ? '#FFD400' : starColors[Math.floor(Date.now() / 100 + index) % starColors.length]);
+                drawStyledBlock(ctx, segment.x, segment.y, gridSize, segmentColor);
+            });
+    }
+
+        // --- NEW: Ultimate+ Effects ---
+        function drawUltimatePlusEffects() {
+            ctx.save();
+            const pulse = (Math.sin(Date.now() / 300) + 1) / 2;
+            ctx.globalAlpha = 0.15 + pulse * 0.2;
+            ctx.globalCompositeOperation = 'lighter';
+            ctx.shadowColor = '#fff';
+            ctx.shadowBlur = 10 + pulse * 10;
+            ctx.drawImage(snakeCanvas, 0, 0, tileCountX * gridSize, tileCountY * gridSize);
+            ctx.restore();
+        }
+
+        function drawNormalFoodOnCanvas() {
+            if (!foodItem) return;
+            const theme = gameThemes[currentGameThemeIndex];
+            const currentGraphicsMode = graphicsModes[currentGraphicsModeIndex].name;
+            drawStyledBlock(ctx, foodItem.x, foodItem.y, gridSize, theme.foodColor);
+            if (!window.__reduceMotion && currentGraphicsMode.includes('ULTIMATE')) {
+                const time = Date.now();
+                const animSpeed = 600;
+                const blockX = foodItem.x * gridSize;
+                const blockY = foodItem.y * gridSize;
+                const foodCenterX = blockX + gridSize / 2;
+                const foodCenterY = blockY + gridSize / 2;
+                const pulseFactor = (Math.sin(time / animSpeed + (foodItem.x + foodItem.y) / 5) + 1) / 2;
+                const highlightRadius = gridSize * 0.15 * (0.5 + pulseFactor * 0.5);
+                const highlightAlpha = 0.4 + pulseFactor * 0.3;
+                ctx.fillStyle = `rgba(255, 255, 220, ${highlightAlpha})`;
+                ctx.beginPath();
+                ctx.arc(foodCenterX, foodCenterY, Math.max(1, highlightRadius), 0, Math.PI * 2);
+                ctx.fill();
+            }
+        }
+        function drawCoinsOnCanvas() {
+            if (!activeCoinItems || activeCoinItems.length === 0) return;
+            const now = Date.now();
+            activeCoinItems.forEach(coin => {
+                const bobbingOffset = Math.sin(now / 200 + coin.x) * 2;
+                const x = coin.x * gridSize + gridSize / 2;
+                const y = coin.y * gridSize + gridSize / 2 + bobbingOffset;
+                
+                const pulseFactor = (window.__reduceMotion ? 0 : ((Math.sin(now / 175 + coin.x) + 1) / 2));
+                const glowRadius = gridSize * 0.5 + (gridSize * 0.4 * pulseFactor);
+                const glowAlpha = 0.2 + (0.4 * pulseFactor);
+                ctx.fillStyle = `rgba(255, 223, 0, ${glowAlpha})`;
+                ctx.beginPath();
+                ctx.arc(x, y, glowRadius, 0, Math.PI * 2);
+                ctx.fill();
+                
+                const iconKey = POWERUP_TYPE_COIN;
+                if (activeIconCache[iconKey]) {
+                    ctx.drawImage(activeIconCache[iconKey], x - gridSize / 2, y - gridSize / 2 + bobbingOffset);
+                } else {
+                    drawCoinIcon(x, y, gridSize);
+                }
+             });
+        }
+        
+        function drawActivePowerUp() {
+            if (!activePowerUpItem) return;
+            const x = activePowerUpItem.x * gridSize + gridSize / 2;
+            const y = activePowerUpItem.y * gridSize + gridSize / 2;
+            const iconKey = activePowerUpItem.type;
+
+            if (activeIconCache[iconKey]) {
+                ctx.drawImage(activeIconCache[iconKey], x - gridSize / 2, y - gridSize / 2);
+                if (iconKey === POWERUP_TYPE_FOOD_MAGNET) {
+                    drawMagnetIconV2(ctx, x, y, gridSize);
+                }
+            } else { 
+                if (iconKey === POWERUP_TYPE_GHOST) drawGhostIcon(x, y, gridSize);
+                else if (iconKey === POWERUP_TYPE_STAR) drawStarIcon(x, y, gridSize);
+                else if (iconKey === POWERUP_TYPE_FOOD_MAGNET) drawMagnetIconV2(ctx, x, y, gridSize);
+                else if (iconKey === POWERUP_TYPE_LENGTH_CUTTER) drawLengthCutterIconV2(ctx, x, y, gridSize);
+                else if (iconKey === POWERUP_TYPE_COIN) drawCoinIcon(x, y, gridSize);
+            }
+        }
+
+        function drawObstacles(){
+            if(!obstaclesEnabled || obstaclesArray.length === 0) return;
+            obstaclesArray.forEach(obs => {
+                drawShinySteelObstacle(ctx, obs.x * gridSize, obs.y * gridSize, gridSize);
+            });
+        }
+        
+        function clearCanvas() {
+            const theme = gameThemes[currentGameThemeIndex];
+            ctx.fillStyle = theme.canvasBg;
+            const __w = (typeof tileCountX !== 'undefined' ? tileCountX * gridSize : canvas.width);
+            const __h = (typeof tileCountY !== 'undefined' ? tileCountY * gridSize : canvas.height);
+            ctx.fillRect(0, 0, __w, __h);
+        }
+
+        function drawGameOnDemand(){
+            redrawSnakeCanvas();
+            renderFrame();
+        }
+
+        function updateStatusDisplay() {
+            const now = Date.now();
+
+            coinStatusDisplay.textContent = `COINS: ${coinsCollectedThisGame}/${COIN_COLLECTION_GOAL}`;
+
+            if (comboCounter > 1 && now < lastItemCollectionTime + COMBO_TIMER_DURATION) {
+                const timeLeft = ((lastItemCollectionTime + COMBO_TIMER_DURATION) - now) / 1000;
+                comboStatusDisplay.textContent = `COMBO x${comboCounter}: ${timeLeft.toFixed(1)}s`;
+                comboStatusDisplay.classList.add('visible');
+            } else {
+                if(comboCounter > 0 && now >= lastItemCollectionTime + COMBO_TIMER_DURATION) {
+                    comboCounter = 0;
+                }
+                comboStatusDisplay.classList.remove('visible');
+            }
+            
+        }
+
+        // --- Game Logic Functions ---
+        function shrinkSnake(segs){ 
+            for(let i=0;i<segs;i++){
+                if(snake.length>MIN_SNAKE_LENGTH){
+                    snake.pop();
+                } else {
+                    break;
+                }
+            }
+            redrawSnakeCanvas(); // Redraw after shrinking
+        }
+        
+        /* ============================================================
+           SECTION: SCORING & COMBO
+           Combo multiplier on quick consecutive pickups; addPoints applies it.
+           ============================================================ */
+        function updateCombo() {
+            const now = Date.now();
+            if (now - lastItemCollectionTime <= COMBO_TIMER_DURATION) {
+                comboCounter++;
+            } else {
+                comboCounter = 1;
+            }
+            lastItemCollectionTime = now;
+            if (comboCounter > maxComboThisGame) maxComboThisGame = comboCounter;
+        }
+
+        function addPoints(bP, isComboable = true){ 
+            let pTA=bP;
+            if (isComboable && comboCounter > 1) {
+                pTA *= comboCounter;
+            }
+            if(obstaclesMode===OBSTACLE_MODE_CLASSIC){ pTA=Math.floor(pTA*SCORE_BONUS_OBSTACLES); }
+            else if (obstaclesMode===OBSTACLE_MODE_EXTREME){ pTA=Math.floor(pTA*(SCORE_BONUS_OBSTACLES*2)); }
+            score+=pTA;
+            if (!newHighCelebrated && gameStartBest > 0 && score > gameStartBest) {
+                newHighCelebrated = true;
+                celebrateNewHighScore(true);
+            }
+        }
+
+        function recordPowerUpCollected(type) { powerUpsCollectedInGame[type] = (powerUpsCollectedInGame[type] || 0) + 1;
+        }
+        
+        function updateStatusAndPowerups() {
+            const now = Date.now();
+            let needsRedraw = false;
+
+            // Coin TTL: remove expired coins
+            activeCoinItems = activeCoinItems.filter(c => !c.spawnTime || now - c.spawnTime <= COIN_TTL_MS);
+
+            if (snakeStatus.starMode && now > snakeStatus.starModeEndTime) { 
+                snakeStatus.starMode = false;
+                needsRedraw = true;
+            }
+            if (snakeStatus.ghostMode && now > snakeStatus.ghostModeEndTime) { 
+                snakeStatus.ghostMode = false;
+                needsRedraw = true;
+            }
+            
+            if (snakeStatus.foodMagnetActive && now > snakeStatus.foodMagnetActiveEndTime) {
+                snakeStatus.foodMagnetActive = false;
+            } else if (snakeStatus.foodMagnetActive) {
+                const head = snake[0];
+                let itemsToPull = [];
+                if (foodItem) { itemsToPull.push(foodItem); }
+                if (activePowerUpItem) { itemsToPull.push(activePowerUpItem); }
+                itemsToPull = itemsToPull.concat(activeCoinItems);
+
+                itemsToPull.forEach(item => {
+                    const headPosPx = { x: head.x * gridSize + gridSize / 2, y: head.y * gridSize + gridSize / 2 };
+                    const itemPosPx = { x: item.x * gridSize + gridSize / 2, y: item.y * gridSize + gridSize / 2 };
+                    const distX_px = headPosPx.x - itemPosPx.x;
+                    const distY_px = headPosPx.y - itemPosPx.y;
+                    const distance_px = Math.sqrt(distX_px * distX_px + distY_px * distY_px);
+
+                    // Only gentle pull post-move to avoid 'trailing' bug; snapping is done pre-move
+                    if (distance_px < FOOD_MAGNET_RADIUS) {
+                        const pullSpeedFactor = 0.45;
+                        let newX = Math.round((itemPosPx.x + distX_px * pullSpeedFactor - gridSize / 2) / gridSize);
+                        let newY = Math.round((itemPosPx.y + distY_px * pullSpeedFactor - gridSize / 2) / gridSize);
+                        item.x = Math.max(0, Math.min(tileCountX - 1, newX));
+                        item.y = Math.max(0, Math.min(tileCountY - 1, newY));
+                    }
+                });
+            }
+            
+            if (needsRedraw) {
+                redrawSnakeCanvas();
+            }
+            updateStatusDisplay();
+        }
+
+        function attemptPowerupSpawn() {
+             const now = Date.now();
+             if (powerUpsEnabled && !activePowerUpItem && totalFoodEatenInCurrentGame >= THEME_CYCLE_FOOD_COUNT && !powerUpSpawnedThisThemeCycle && now > lastPowerUpItemSpawnAttempt + POWERUP_ITEM_SPAWN_INTERVAL) {
+                 if (Math.random() < POWERUP_ITEM_SPAWN_CHANCE_PER_INTERVAL) {
+                     placeItemPowerUp();
+                 }
+                 lastPowerUpItemSpawnAttempt = now;
+             }
+             if (activePowerUpItem && activePowerUpItem.foodEatenWhileActive >= POWERUP_DESPAWN_FOOD_COUNT) {
+                 activePowerUpItem = null;
+             }
+        }
+        
+        /* ============================================================
+           SECTION: SNAKE MOVEMENT
+           Advances the head (wraps when Walls are off), handles eating and growth.
+           ============================================================ */
+        function moveSnake() {
+            let __hx = snake[0].x + dx;
+            let __hy = snake[0].y + dy;
+            if (!wallsEnabled) {
+                __hx = (__hx + tileCountX) % tileCountX;
+                __hy = (__hy + tileCountY) % tileCountY;
+            }
+            const head = { x: __hx, y: __hy };
+            const ateFood = (foodItem && head.x === foodItem.x && head.y === foodItem.y);
+
+            snake.unshift(head);
+
+            if (!ateFood) {
+                if (snake.length > MIN_SNAKE_LENGTH) {
+                    snake.pop();
+                }
+            }
+
+            if (ateFood) {
+                playSfx(sfxEat);
+                triggerHaptic('LIGHT');
+                updateCombo();
+                totalFoodEatenInCurrentGame++;
+                normalFoodEatenInGame++;
+                totalFoodEatenOverall++;
+                playerUnlockLevel = totalFoodEatenOverall;
+                checkAndQueueNewUnlocksIfThresholdMet();
+                const diffConfig = difficultySettings[difficultyLevels[currentDifficultyIndex]];
+                addPoints(diffConfig.pointsPerFood);
+                foodEatenForThemeCycle++;
+                if (activePowerUpItem) activePowerUpItem.foodEatenWhileActive++;
+                
+                // Spawn a random number of coins (1..4) using weighted distribution every time food is eaten
+                const nCoins = chooseRandomCoinSpawnCount();
+                spawnCoins(nCoins);
+
+                if (obstaclesEnabled) {
+                    if (totalFoodEatenInCurrentGame >= THEME_CYCLE_FOOD_COUNT) foodEatenForObstacleGrowth++;
+                    foodEatenForObstacleClearCycle++;
+                    if (totalFoodEatenInCurrentGame >= THEME_CYCLE_FOOD_COUNT && !initialObstaclesSpawnedThisGame) {
+                        spawnInitialObstacles();
+                        initialObstaclesSpawnedThisGame = true;
+                    }
+                    if (foodEatenForObstacleGrowth >= OBSTACLE_GROWTH_FOOD_THRESHOLD && obstaclesArray.length < MAX_OBSTACLES) {
+                        addSingleObstacle();
+                        foodEatenForObstacleGrowth = 0;
+                    }
+                    if (foodEatenForObstacleClearCycle >= OBSTACLE_CLEAR_CYCLE_FOOD_COUNT) {
+                        clearAllObstacles();
+                        spawnInitialObstacles();
+                        foodEatenForObstacleClearCycle = 0;
+                        foodEatenForObstacleGrowth = 0;
+                    }
+                }
+                const currentDiffConfig = difficultySettings[difficultyLevels[currentDifficultyIndex]];
+                if (currentSnakeSpeed > currentDiffConfig.minSpeed) {
+                    currentSnakeSpeed -= currentDiffConfig.speedIncrement;
+                    if (currentSnakeSpeed < currentDiffConfig.minSpeed) currentSnakeSpeed = currentDiffConfig.minSpeed;
+                }
+                updateScoreDisplay();
+                placeNormalFood();
+                
+                if (!keepThemeEnabled && foodEatenForThemeCycle >= THEME_CYCLE_THRESHOLD) {
+                    foodEatenForThemeCycle = 0;
+                    currentGameThemeIndex = (currentGameThemeIndex + 1) % gameThemes.length;
+                }
+                if (normalFoodEatenInGame % THEME_CYCLE_FOOD_COUNT === 0) {
+                    powerUpSpawnedThisThemeCycle = false;
+                }
+            }
+
+            if (activePowerUpItem && head.x === activePowerUpItem.x && head.y === activePowerUpItem.y) {
+                playSfx(sfxPowerup);
+                triggerHaptic('MEDIUM');
+                const now = Date.now();
+                recordPowerUpCollected(activePowerUpItem.type);
+                updateCombo();
+                switch (activePowerUpItem.type) {
+                    case POWERUP_TYPE_GHOST: snakeStatus.ghostMode = true; snakeStatus.ghostModeEndTime = now + GHOST_DURATION; addPoints(POINTS_GHOST_POWERUP); break;
+                    case POWERUP_TYPE_STAR: snakeStatus.starMode = true; snakeStatus.starModeEndTime = now + STAR_DURATION; addPoints(POINTS_STAR_POWERUP); redrawSnakeCanvas(); break;
+                    case POWERUP_TYPE_FOOD_MAGNET: snakeStatus.foodMagnetActive = true; snakeStatus.foodMagnetActiveEndTime = now + FOOD_MAGNET_DURATION; addPoints(POINTS_FOOD_MAGNET_POWERUP); break;
+                    case POWERUP_TYPE_LENGTH_CUTTER: shrinkSnake(LENGTH_CUTTER_SEGMENTS_TO_REMOVE); addPoints(POINTS_LENGTH_CUTTER); break;
+                }
+                activePowerUpItem = null;
+                updateScoreDisplay();
+                updateStatusDisplay();
+            }
+
+            // Collect ALL coins at the head position (handles overlaps)
+            let collected = 0;
+            for (let i = activeCoinItems.length - 1; i >= 0; i--) {
+                const coin = activeCoinItems[i];
+                if (head.x === coin.x && head.y === coin.y) {
+                    activeCoinItems.splice(i, 1);
+                    coinsCollectedThisGame++;
+                    coinsCollectedThisGameTotal++;
+                    collected++;
+                }
+            }
+            if (collected > 0) {
+                playSfx(sfxCoin);
+                triggerHaptic('LIGHT');
+                updateCombo();
+                updateStatusDisplay();
+                if (coinsCollectedThisGame >= COIN_COLLECTION_GOAL) {
+                    if(obstaclesEnabled) {
+                        obstaclesArray.forEach(obs => addPoints(POINTS_PER_OBSTACLE_EATEN, false));
+                        clearAllObstacles();
+                    }
+                    addPoints(COIN_REWARD_BONUS_POINTS, false);
+                    const now = Date.now();
+                    snakeStatus.ghostMode = true;
+                    snakeStatus.ghostModeEndTime = now + GHOST_DURATION;
+                    snakeStatus.foodMagnetActive = true;
+                    snakeStatus.foodMagnetActiveEndTime = now + FOOD_MAGNET_DURATION;
+                    coinsCollectedThisGame = 0;
+                    updateScoreDisplay();
+                    updateStatusDisplay();
+                }
+            }
+        }
+
+        /* ============================================================
+           SECTION: COLLISIONS
+           Walls (unless wrapping), self, and obstacles -> triggerGameOver.
+           ============================================================ */
+        function checkCollisions(){
+            const head=snake[0];
+            if(wallsEnabled && (head.x<0||head.x>=tileCountX||head.y<0||head.y>=tileCountY)){triggerGameOver("HIT A WALL!");return;}
+            if(obstaclesEnabled){
+                for(let i=obstaclesArray.length-1;i>=0;i--){
+                    const obs=obstaclesArray[i];
+                    if(head.x===obs.x&&head.y===obs.y){
+                        if(snakeStatus.starMode){
+                            if (obstaclesMode===OBSTACLE_MODE_EXTREME) {
+                                const count = obstaclesArray.length;
+                                obstaclesArray = [];
+                                for (let k=0;k<count;k++) addPoints(POINTS_PER_OBSTACLE_EATEN, false);
+                                updateScoreDisplay();
+                                break;
+                            } else {
+                                obstaclesArray.splice(i,1);
+                                addPoints(POINTS_PER_OBSTACLE_EATEN, false);
+                                updateScoreDisplay();
+                            }
+                        }
+                        else{triggerGameOver("HIT AN OBSTACLE!");return;}
+                    }
+                }
+            }
+            if(snakeStatus.ghostMode||snakeStatus.starMode)return;
+            for(let i=1;i<snake.length;i++){if(head.x===snake[i].x&&head.y===snake[i].y){triggerGameOver("ATE YOURSELF!");return;}}
+        }
+        function isGridSquareOccupied(pos) {
+            if (snake && snake.some(segment => segment.x === pos.x && segment.y === pos.y)) return true;
+            if (foodItem && foodItem.x === pos.x && foodItem.y === pos.y) return true;
+            if (activePowerUpItem && activePowerUpItem.x === pos.x && activePowerUpItem.y === pos.y) return true;
+            if (activeCoinItems.some(coin => coin.x === pos.x && coin.y === pos.y)) return true;
+            if (obstaclesArray.some(obstacle => obstacle.x === pos.x && obstacle.y === pos.y)) return true;
+            return false;
+        }
+
+        // === Unified Free-Cell Spawner & Helpers ===
+        function devAssert(condition, message) {
+            if (!condition) {
+                console.error("[ASSERT FAILED]", message);
+            }
+        }
+        function posKey(x, y) { return x + "," + y; }
+        function getOccupiedSet() {
+            const occ = new Set();
+            if (snake) { snake.forEach(seg => occ.add(posKey(seg.x, seg.y))); }
+            if (foodItem) { occ.add(posKey(foodItem.x, foodItem.y)); }
+            if (activePowerUpItem) { occ.add(posKey(activePowerUpItem.x, activePowerUpItem.y)); }
+            if (activeCoinItems && activeCoinItems.length) {
+                activeCoinItems.forEach(c => occ.add(posKey(c.x, c.y)));
+            }
+            if (obstaclesArray && obstaclesArray.length) {
+                obstaclesArray.forEach(o => occ.add(posKey(o.x, o.y)));
+            }
+            return occ;
+        }
+        function getFreeCells() {
+            const occ = getOccupiedSet();
+            const free = [];
+            for (let y = 0; y < tileCountY; y++) {
+                for (let x = 0; x < tileCountX; x++) {
+                    if (!occ.has(posKey(x, y))) {
+                        free.push({ x, y });
+                    }
+                }
+            }
+            return free;
+        }
+        function pickRandomFreeCells(k) {
+            const free = getFreeCells();
+            if (free.length === 0) return [];
+            const needed = Math.min(k, free.length);
+            // sample without replacement
+            for (let i = free.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                const tmp = free[i]; free[i] = free[j]; free[j] = tmp;
+            }
+            return free.slice(0, needed);
+        }
+        function chooseRandomCoinSpawnCount() {
+            const total = COIN_SPAWN_WEIGHTS.reduce((a,b)=>a+b.weight,0);
+            let r = Math.random() * total;
+            for (const w of COIN_SPAWN_WEIGHTS) {
+                if (r < w.weight) return w.count;
+                r -= w.weight;
+            }
+            return 1; // fallback
+        }
+        function spawnCoins(n) {
+            const spots = pickRandomFreeCells(n);
+            const now = Date.now();
+            spots.forEach(p => {
+                devAssert(!isGridSquareOccupied(p), "spawnCoins picked an occupied cell at " + JSON.stringify(p));
+                activeCoinItems.push({ x: p.x, y: p.y, spawnTime: now });
+            });
+        }
+        
+
+    
+        // === Magnet Pre-Move Snap (fixes 'chasing' bug) ===
+        function applyMagnetSnapPreMove() {
+            if (!snakeStatus.foodMagnetActive) return;
+            const head = snake[0];
+            if (!head) return;
+            const nextHeadPos = { x: head.x + dx, y: head.y + dy };
+            const headPosPx = { x: head.x * gridSize + gridSize / 2, y: head.y * gridSize + gridSize / 2 };
+
+            const items = [];
+            if (foodItem) items.push(foodItem);
+            if (activePowerUpItem) items.push(activePowerUpItem);
+            if (activeCoinItems && activeCoinItems.length) items.push(...activeCoinItems);
+
+            items.forEach(item => {
+                const itemPosPx = { x: item.x * gridSize + gridSize / 2, y: item.y * gridSize + gridSize / 2 };
+                const dxPx = headPosPx.x - itemPosPx.x;
+                const dyPx = headPosPx.y - itemPosPx.y;
+                const dist = Math.hypot(dxPx, dyPx);
+                if (dist <= MAGNET_SNAP_RADIUS_PX) {
+                    item.x = nextHeadPos.x;
+                    item.y = nextHeadPos.y;
+                }
+            });
+        }
+        
+        /* ============================================================
+           SECTION: FOOD, COINS & POWER-UPS
+           Spawning + pickup handling for everything edible/collectible.
+           ============================================================ */
+        function placeNormalFood() {
+            const spots = pickRandomFreeCells(1);
+            if (spots.length === 0) {
+                triggerGameOver("NO SPACE FOR FOOD!");
+                return;
+            }
+            const p = spots[0];
+            devAssert(!isGridSquareOccupied(p), "placeNormalFood picked an occupied cell");
+            foodItem.x = p.x;
+            foodItem.y = p.y;
+            foodItem.type = FOOD_TYPE_NORMAL;
+        }
+        
+        function placeItemPowerUp(){
+            if(!foodItem||activePowerUpItem||!powerUpsEnabled||totalFoodEatenInCurrentGame<THEME_CYCLE_FOOD_COUNT||powerUpSpawnedThisThemeCycle)return;
+            const powerUpWeights = [
+                { type: POWERUP_TYPE_LENGTH_CUTTER, weight: 25 },
+                { type: POWERUP_TYPE_FOOD_MAGNET, weight: 20 },
+                { type: POWERUP_TYPE_GHOST, weight: 15 }
+            ];
+            if (obstaclesEnabled) { powerUpWeights.push({ type: POWERUP_TYPE_STAR, weight: 10 }); }
+            if (powerUpWeights.length===0)return;
+            let totalWeight = 0; powerUpWeights.forEach(item => totalWeight += item.weight);
+            let randomPick = Math.random() * totalWeight; let chosenType = null;
+            for (const item of powerUpWeights) { if (randomPick < item.weight) { chosenType = item.type; break; } randomPick -= item.weight; }
+            if (!chosenType) { chosenType = powerUpWeights[0].type; }
+
+            const spot = pickRandomFreeCells(1)[0];
+            if (spot) {
+                devAssert(!isGridSquareOccupied(spot), "placeItemPowerUp picked an occupied cell");
+                activePowerUpItem = { x: spot.x, y: spot.y, type: chosenType, foodEatenWhileActive: 0 };
+                powerUpSpawnedThisThemeCycle = true;
+            }
+        }
+        
+        function spawnInitialObstacles(){ obstaclesArray=[];if(obstaclesEnabled&&totalFoodEatenInCurrentGame>=THEME_CYCLE_FOOD_COUNT){for(let i=0;i<INITIAL_OBSTACLES_COUNT;i++){addSingleObstacle();}}}
+        
+        function addSingleObstacle() {
+            if (obstaclesArray.length >= MAX_OBSTACLES) return;
+            const spot = pickRandomFreeCells(1)[0];
+            if (spot) {
+                devAssert(!isGridSquareOccupied(spot), "addSingleObstacle picked an occupied cell");
+                obstaclesArray.push(spot);
+            }
+        }
+        function clearAllObstacles(){ obstaclesArray=[];}
+        /* ============================================================
+           SECTION: GAME OVER
+           Finalizes the round, records stats/high score, shows the summary.
+           ============================================================ */
+        function triggerGameOver(reason = "") {
+            triggerHaptic('HEAVY');
+            isGameRunning = false;
+            isGameOver = true;
+            if (gameLoopAnimationId) { cancelAnimationFrame(gameLoopAnimationId); gameLoopAnimationId = null;
+            }
+            addScoreToHighScores(score);
+            saveUnlockProgress();
+
+            const gameDurationMs = Date.now() - gameStartTime;
+            const totalSeconds = Math.floor(gameDurationMs / 1000);
+            const minutes = Math.floor(totalSeconds / 60);
+            const seconds = totalSeconds % 60;
+            const timePlayedFormatted = `${minutes.toString().padStart(2, '0')}m ${seconds.toString().padStart(2, '0')}s`;
+            const finalSnakeLength = snake ? snake.length : 0;
+            lifetimeStats.gamesPlayed++;
+            if (finalSnakeLength > lifetimeStats.longestSnake) lifetimeStats.longestSnake = finalSnakeLength;
+            if (maxComboThisGame > lifetimeStats.bestCombo) lifetimeStats.bestCombo = maxComboThisGame;
+            lifetimeStats.totalCoins += coinsCollectedThisGameTotal;
+            lifetimeStats.totalPlayMs += gameDurationMs;
+            saveLifetimeStats();
+            let gameStatsHTML = `<div style="text-align: left; margin-top: 10px;"><p><strong>Time Played:</strong> ${timePlayedFormatted}</p><p><strong>Final Length:</strong> ${finalSnakeLength}</p><p><strong>Normal Food Eaten:</strong> ${normalFoodEatenInGame}</p>`;
+            let powerUpsSummary = "";
+            const powerUpOrder = [ POWERUP_TYPE_LENGTH_CUTTER, POWERUP_TYPE_FOOD_MAGNET, POWERUP_TYPE_GHOST, POWERUP_TYPE_STAR ];
+            const powerUpNames = { [POWERUP_TYPE_LENGTH_CUTTER]: "Length Cutters", [POWERUP_TYPE_FOOD_MAGNET]: "Food Magnets", [POWERUP_TYPE_GHOST]: "Ghost Modes", [POWERUP_TYPE_STAR]: "Star Powers" };
+            powerUpOrder.forEach(type => { if (powerUpsCollectedInGame[type] > 0) { powerUpsSummary += `<li>${powerUpNames[type] || type}: ${powerUpsCollectedInGame[type]}</li>`; } });
+            if (powerUpsSummary) { gameStatsHTML += `<p><strong>Items Collected:</strong></p><ul style="list-style-position: inside; padding-left: 10px; margin-top: 0;">${powerUpsSummary}</ul>`;
+            } else { gameStatsHTML += `<p><strong>Items Collected:</strong> None</p>`; }
+            gameStatsHTML += `</div>`;
+            let newUnlocksMessage = "";
+            if (pendingUnlockNotificationsInSession.length > 0) {
+                newUnlocksMessage += `<div class="unlock-separator" style="margin-top:15px; margin-bottom:10px;"></div><h4 style="color:#2ecc71; margin-bottom:8px;">NEW UNLOCKS!</h4><ul style="list-style-type: none; padding-left: 10px; text-align:left; font-size:11px;">`;
+                pendingUnlockNotificationsInSession.forEach(unlock => { newUnlocksMessage += `<li style="margin-bottom:4px;">${unlock.name} (${unlock.type})</li>`; }); newUnlocksMessage += `</ul>`;
+            }
+            pendingUnlockNotificationsInSession = [];
+            let recordBanner = '';
+            if (score > gameStartBest) {
+                recordBanner = `<p style="text-align:center; color:#FFD54F; font-size:18px; margin:2px 0 8px; text-shadow:0 0 6px rgba(255,213,79,0.7);">&#9733; NEW HIGH SCORE! &#9733;</p>`;
+                if (!newHighCelebrated) { newHighCelebrated = true; celebrateNewHighScore(false); }
+            } else {
+                playSfx(sfxGameOver);
+            }
+            let gameOverMessageHTML = recordBanner + `<p style="text-align:center; margin-bottom:5px;">${reason ? reason + '<br>' : ''}Score: ${score} (Difficulty: ${difficultySettings[difficultyLevels[currentDifficultyIndex]].label})</p>`;
+            gameOverMessageHTML += gameStatsHTML;
+            gameOverMessageHTML += newUnlocksMessage;
+            showGenericMessage(`GAME OVER!`, gameOverMessageHTML); 
+            startRestartButton.innerHTML = RESTART_ICON; 
+            updateStatusDisplay();
+        }
+        function updateScoreDisplay(){ scoreDisplay.textContent=`SCORE: ${score}`;}
+
+        // --- UI and Menu Functions ---
+        function hideSettingsMenuVisually(){ settingsMenu.style.display='none';isSettingsMenuVisible=false;}
+        
+        function showGenericMessage(title, contentHTML, options = {}) {
+            if (!options.keepSettingsOpen) {
+                 hideSettingsMenuVisually();
+            }
+            let containerClass = '';
+            if (options.isAbout) containerClass = 'about-content';
+            else if (options.isHelp) containerClass = 'help-content';
+            else if (options.isUnlocksHighScores) containerClass = 'unlocks-high-scores-content';
+            messageBox.innerHTML = `<h3>${title}</h3><div class="${containerClass}">${contentHTML}</div><button id="message-box-ok">OK</button>`;
+            messageBox.style.display = 'block';
+            isMessageBoxVisible = true;
+            
+            const okBtn = document.getElementById('message-box-ok');
+            if (okBtn) { okBtn.onclick = () => { hideMessageBox(); };
+            }
+            
+            if (options.isAbout) {
+                const vE = document.getElementById('version-number-text');
+                if (vE) {
+                    versionTapCount = 0;
+                    lastVersionTapTime = 0;
+                    vE.removeEventListener('click', handleVersionTap);
+                    vE.addEventListener('click', handleVersionTap);
+                }
+            }
+        }
+
+        function handleVersionTap(){
+            const cT=Date.now();
+            if(cT-lastVersionTapTime>EASTER_EGG_TAP_INTERVAL){versionTapCount=1;}else{versionTapCount++;} lastVersionTapTime=cT;
+            if(versionTapCount>=5){
+                totalFoodEatenOverall = 200;
+                playerUnlockLevel = totalFoodEatenOverall;
+                [gameThemes, phoneColors, snakeSkins].forEach(itemArray => {
+                    itemArray.forEach(item => {
+                        if (item.unlockLevelRequired > 0 || item.isNewUnlock) {
+                            if (item.name && item.name !== 'THEME SNAKE') markItemAsNotified(item.name);
+                         }
+                    });
+                });
+                saveUnlockProgress();
+                loadGameTheme();
+                loadPhoneColor();
+                loadSnakeSkin();
+                triggerScoreFlash();
+                showGenericMessage("DEV MODE ACTIVATED", "<p>All items permanently unlocked!</p>");
+                versionTapCount=0;
+            }
+        }
+        function showUnlocksAndHighScoresMessage() {
+            playSfx(sfxClick);
+            loadHighScores();
+            let contentHTML = `<h4 style="text-align:center; margin-bottom:10px; color:#f0c040;">High Scores (Difficulty: ${difficultySettings[difficultyLevels[currentDifficultyIndex]].label})</h4><ol style="margin-bottom: 20px;">`;
+            if (highScores.length === 0) { for (let i = 0; i < MAX_TOP_SCORES; i++) { contentHTML += `<li>---</li>`;
+            } } else { for (let i = 0; i < MAX_TOP_SCORES; i++) { contentHTML += `<li>${highScores[i] !== undefined ? highScores[i] : '---'}</li>`; } }
+            contentHTML += '</ol><div class="high-score-separator"></div><div class="unlocks-section"><h4>Game Theme Unlocks</h4><ul>';
+            const actualThemeUnlocks = gameThemes.filter(theme => theme.isNewUnlock === true || theme.unlockLevelRequired > 0);
+            if (actualThemeUnlocks.length > 0) { actualThemeUnlocks.forEach(theme => { const isUnlocked = playerUnlockLevel >= theme.unlockLevelRequired; const statusClass = isUnlocked ? 'unlocked' : 'locked'; const statusText = isUnlocked ? 'Unlocked!' : `Locked (needs ${theme.unlockLevelRequired} total food)`; contentHTML += `<li class="${statusClass}"><span class="item-name">${theme.name}</span>: <span class="item-status">${statusText}</span></li>`; });
+            } else { contentHTML += `<li>No themes to unlock yet!</li>`;
+            }
+            contentHTML += '</ul></div><div class="unlocks-section" style="margin-top:15px;"><h4>Phone Color Unlocks</h4><ul>';
+            const actualColorUnlocks = phoneColors.filter(color => color.isNewUnlock === true || color.unlockLevelRequired > 0);
+            if (actualColorUnlocks.length > 0) { actualColorUnlocks.forEach(color => { const isUnlocked = playerUnlockLevel >= color.unlockLevelRequired; const statusClass = isUnlocked ? 'unlocked' : 'locked'; const statusText = isUnlocked ? 'Unlocked!' : `Locked (needs ${color.unlockLevelRequired} total food)`; contentHTML += `<li class="${statusClass}"><span class="item-name">${color.name}</span>: <span class="item-status">${statusText}</span></li>`; });
+            } else { contentHTML += `<li>No phone colors to unlock yet!</li>`;
+            }
+            contentHTML += '</ul></div><div class="unlocks-section" style="margin-top:15px;"><h4>Snake Skin Unlocks</h4><ul>';
+            const actualSkinUnlocks = snakeSkins.filter(skin => skin.isNewUnlock === true || skin.unlockLevelRequired > 0);
+            if (actualSkinUnlocks.length > 0) { actualSkinUnlocks.forEach(skin => { if (skin.patternType === 'theme_default') return; const isUnlocked = playerUnlockLevel >= skin.unlockLevelRequired; const statusClass = isUnlocked ? 'unlocked' : 'locked'; const statusText = isUnlocked ? 'Unlocked!' : `Locked (needs ${skin.unlockLevelRequired} total food)`; contentHTML += `<li class="${statusClass}"><span class="item-name">${skin.name}</span>: <span class="item-status">${statusText}</span></li>`; });
+            } else { contentHTML += `<li>No special snake skins to unlock yet!</li>`;
+            }
+            contentHTML += `</ul></div><p style="font-size:10px; margin-top:20px; text-align:center; color: #aaa;">Total Normal Food Eaten (for Unlocks): ${totalFoodEatenOverall}</p>`;
+            showGenericMessage("UNLOCKS & HIGH SCORES", contentHTML, { isUnlocksHighScores: true, keepSettingsOpen: true });
+        }
+        /* ============================================================
+           SECTION: MENUS, ABOUT, HELP & MESSAGES
+           The settings menu plus the popup screens.
+           ============================================================ */
+        function showAboutInfo(){ 
+            playSfx(sfxClick);
+            const eLOC=3739; // Updated line count
+            const aC=`<p id="version-number-text" class="version-text" title="Tap me lots!">Version 2.0</p><p class="code-lines-text">${eLOC} Lines of Code</p><div class="separator"></div><h4 class="stats-heading">Lifetime Stats</h4>${getStatsPanelHTML()}<div class="separator"></div><p class="credits-text"><strong>Retro Snake Pixel Art Edition</strong></p><p class="credits-text" style="margin-top:5px;">Open source &#183; free to play, study, and build on</p><div class="separator"></div><div class="dedication">This whole game is yours. Fork it, remix it, tear it apart, and make something new &#8212; no permission or credit needed. It started as one small project and grew through a year of building with AI. If it helps you fall in love with creating things, that's the point.<span class="sig">&#8212; the Digital Spellcaster &#10024;</span></div>`;
+            showGenericMessage("ABOUT SNAKE", aC, { isAbout: true, keepSettingsOpen: true });
+        }
+        
+        function getIconHTML(iconType, size = 24) {
+            const cachedIcon = iconCache[iconType];
+            if (cachedIcon) {
+                return `<img src="${cachedIcon}" alt="${iconType} icon" style="vertical-align:middle;margin-right:8px;width:${size}px;height:${size}px;image-rendering:pixelated;-ms-interpolation-mode:nearest-neighbor;">`;
+            }
+            return `<span style="display:inline-block;width:${size}px;height:${size}px;border:1px dashed #555;vertical-align:middle;margin-right:8px;text-align:center;">?</span>`;
+        }
+
+        function preRenderHelpIcons() {
+            const iconTypes = [ POWERUP_TYPE_GHOST, POWERUP_TYPE_STAR, POWERUP_TYPE_FOOD_MAGNET, POWERUP_TYPE_LENGTH_CUTTER, POWERUP_TYPE_COIN, OBSTACLE_TYPE_SPIKE_BLOCK, FOOD_TYPE_NORMAL ];
+            const size = 24;
+            const originalGameCtx = ctx;
+
+            iconTypes.forEach(type => {
+                const tempCanvas = document.createElement('canvas');
+                tempCanvas.width = size;
+                tempCanvas.height = size;
+                const tempCtx = tempCanvas.getContext('2d');
+                ctx = tempCtx;
+
+                tempCtx.clearRect(0, 0, size, size);
+                try {
+                    const x = size / 2, y = size / 2;
+                    if (type === POWERUP_TYPE_GHOST) drawGhostIcon(x, y, size);
+                    else if (type === POWERUP_TYPE_STAR) drawStarIcon(x, y, size);
+                    else if (type === POWERUP_TYPE_FOOD_MAGNET) drawMagnetIconV2(ctx, x, y, size);
+                    else if (type === POWERUP_TYPE_LENGTH_CUTTER) drawLengthCutterIconV2(ctx, x, y, size);
+                    else if (type === POWERUP_TYPE_COIN) drawCoinIcon(x, y, size);
+                    else if (type === OBSTACLE_TYPE_SPIKE_BLOCK) drawShinySteelObstacle(ctx, 0, 0, size);
+                    else if (type === FOOD_TYPE_NORMAL) drawNormalFoodIcon(x, y, size);
+                    iconCache[type] = tempCanvas.toDataURL();
+                } catch (e) { console.error(`Error pre-rendering icon for ${type}:`, e); }
+            });
+            ctx = originalGameCtx;
+        }
+
+        function preRenderActivePowerups() {
+            activeIconCache = {};
+            const iconTypes = [POWERUP_TYPE_GHOST, POWERUP_TYPE_STAR, POWERUP_TYPE_FOOD_MAGNET, POWERUP_TYPE_LENGTH_CUTTER, POWERUP_TYPE_COIN];
+            const size = gridSize;
+            const originalGameCtx = ctx;
+
+            iconTypes.forEach(type => {
+                const tempCanvas = document.createElement('canvas');
+                tempCanvas.width = size;
+                tempCanvas.height = size;
+                const tempCtx = tempCanvas.getContext('2d');
+                ctx = tempCtx;
+
+                const originalDateNow = Date.now;
+                Date.now = () => 0;
+                try {
+                    const x = size / 2, y = size / 2;
+
+                    if (type === POWERUP_TYPE_GHOST) drawGhostIcon(x, y, size);
+                    else if (type === POWERUP_TYPE_STAR) drawStarIcon(x, y, size);
+                    else if (type === POWERUP_TYPE_FOOD_MAGNET) drawMagnetIconV2(ctx, x, y, size);
+                    else if (type === POWERUP_TYPE_LENGTH_CUTTER) drawLengthCutterIconV2(ctx, x, y, size);
+                    else if (type === POWERUP_TYPE_COIN) drawCoinIcon(x, y, size);
+                    
+                    activeIconCache[type] = tempCanvas;
+                } catch (e) {
+                    console.error(`Error pre-rendering active icon for ${type}:`, e);
+                } finally {
+                    Date.now = originalDateNow;
+                }
+            });
+
+            ctx = originalGameCtx;
+        }
+
+        function showHelpMessage(){
+            playSfx(sfxClick);
+            const hC = `<div style="text-align:left;">
+                <p><strong>Item Power-Ups & Collectibles:</strong></p>
+                <ul style="list-style-type:none;padding-left:0;">
+                    <li style="margin-bottom:10px;">${getIconHTML(POWERUP_TYPE_GHOST)}<strong>Ghost Mode:</strong> Pass through self & obstacles.</li>
+                    <li style="margin-bottom:10px;">${getIconHTML(POWERUP_TYPE_STAR)}<strong>Star Power:</strong> Invincible! Eat obstacles for points.</li>
+                    <li style="margin-bottom:10px;">${getIconHTML(POWERUP_TYPE_FOOD_MAGNET)}<strong>Food Magnet:</strong> Pulls items towards you.</li>
+                    <li style="margin-bottom:10px;">${getIconHTML(POWERUP_TYPE_LENGTH_CUTTER)}<strong>Length Cutter:</strong> Shrinks snake by ${LENGTH_CUTTER_SEGMENTS_TO_REMOVE} segments.</li>
+                </ul>
+                <div class="separator"></div>
+                <p><strong>Coin Collection:</strong></p>
+                <ul style="list-style-type:none;padding-left:0;">
+                    <li style="margin-bottom:10px;">${getIconHTML(POWERUP_TYPE_COIN)}<strong>Coins:</strong> Collect ${COIN_COLLECTION_GOAL} to trigger a reward: +${COIN_REWARD_BONUS_POINTS} points & gain Ghost/Magnet powers!</li>
+                </ul>
+                <div class="separator"></div>
+                <p><strong>Unlock new items by eating NORMAL FOOD! Check "UNLOCKS & HI SCORES" in settings.</strong></p>
+            </div>`;
+            showGenericMessage("GAME HELP", hC, { isHelp: true, keepSettingsOpen: true });
+        }
+        function hideMessageBox(){ const vE=document.getElementById('version-number-text');if(vE){vE.removeEventListener('click',handleVersionTap);}messageBox.style.display='none';isMessageBoxVisible=false;}
+        
+        function showSettingsMenu(){
+            if(isMessageBoxVisible) hideMessageBox();
+            gameWasRunningBeforeMenu = isGameRunning;
+            if(isGameRunning) isGameRunning = false;
+            updateCycleDifficultyButtonUI();
+            updateCyclePhoneColorButtonUI();
+            updateCycleGameThemeButtonUI();
+            updateCycleSnakeSkinButtonUI();
+            updateCycleDPadStyleButtonUI();
+            updateCycleGraphicsModeButtonUI();
+            updateCycleFpsButtonUI();
+            updateCycleScreenModeButtonUI();
+            updateObstaclesButtonUI();
+            updateWallsButtonUI();
+            updateSwipeButtonUI();
+            updateLargeFontsButtonUI();
+            updateKeepThemeButtonUI();
+            settingsMenu.style.display='flex';
+            isSettingsMenuVisible=true;
+            scaleSettingsMenuToGameScreen();
+        }
+        
+        function hideSettingsAndPlay() {
+            playSfx(sfxClick);
+            settingsMenu.style.display = 'none';
+            isSettingsMenuVisible = false;
+
+            applySettings();
+            if (gameWasRunningBeforeMenu && !isGameOver) {
+                isGameRunning = true;
+                isPaused = false;
+                hidePauseOverlay();
+                startRestartButton.innerHTML = PAUSE_ICON;
+                lastFrameTime = performance.now();
+            } else {
+                startGame();
+            }
+        }
+        
+        function applySettings() {
+            applyPhoneColorAndInfoText();
+            applyDPadStyle();
+            drawGameOnDemand();
+        }
+
+        function exitGame(){ try{if(window.Capacitor&&window.Capacitor.Plugins&&window.Capacitor.Plugins.App){const{App}=window.Capacitor.Plugins;App.exitApp();}else{if(typeof window.close==='function'){window.close();if(!window.closed){showGenericMessage("Exit","<p>Could not close. Please close tab manually.</p>");}}else{showGenericMessage("Exit","<p>Please close tab manually.</p>");}}}catch(e){showGenericMessage("Error","<p>Error exiting.</p>");}}
+        
+        async function enterImmersiveMode() {
+            try {
+                if (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.BoengliCapacitorFullscreen) {
+                    const { BoengliCapacitorFullscreen } = window.Capacitor.Plugins;
+                    await BoengliCapacitorFullscreen.enter({ hideStatusBar: true, hideNavigationBar: true });
+                }
+            } catch (e) {
+                console.error('Error entering immersive mode:', e);
+            }
+        }
+
+        /* ============================================================
+           SECTION: INPUT — direction queue & keyboard
+           Buffered turns prevent 180-degree reversals; arrow/WASD keys here too.
+           ============================================================ */
+        function queueDirectionChange(newDx, newDy) {
+            if (!isGameRunning || isGameOver || (newDx === 0 && newDy === 0)) return;
+            if (inputQueue.length >= MAX_INPUT_QUEUE_LENGTH) return;
+        
+            const lastMove = inputQueue.length > 0 ? inputQueue[inputQueue.length - 1] : { dx: dx, dy: dy };
+            const isReverseHorizontal = lastMove.dx !== 0 && newDx === -lastMove.dx;
+            const isReverseVertical = lastMove.dy !== 0 && newDy === -lastMove.dy;
+            if (isReverseHorizontal || isReverseVertical) {
+                return;
+            }
+            
+            const direction = { dx: newDx, dy: newDy };
+            inputQueue.push(direction);
+        }
+        
+        function handleKeyPress(e){
+            if (isSettingsMenuVisible || isMessageBoxVisible) return;
+            const key = e.key.toLowerCase();
+            if(key==='arrowup'||key==='w'){ queueDirectionChange(0, -1); } 
+            else if(key==='arrowdown'||key==='s'){ queueDirectionChange(0, 1);
+            }
+            else if(key==='arrowleft'||key==='a'){ queueDirectionChange(-1, 0);
+            } 
+            else if(key==='arrowright'||key==='d'){ queueDirectionChange(1, 0);
+            }
+        }
+        
+        let sRActInProg=false;
+        function showPauseOverlay() {
+            const ov = document.getElementById('pause-overlay');
+            if (ov) ov.classList.add('shown');
+        }
+        function hidePauseOverlay() {
+            const ov = document.getElementById('pause-overlay');
+            if (ov) ov.classList.remove('shown');
+        }
+        function pauseGame() {
+            if (!isGameRunning || isGameOver || isPaused) return;
+            isPaused = true;
+            startRestartButton.innerHTML = START_ICON; // ▶ = resume
+            showPauseOverlay();
+            triggerHaptic('LIGHT');
+        }
+        function resumeGame() {
+            if (!isPaused) return;
+            isPaused = false;
+            hidePauseOverlay();
+            startRestartButton.innerHTML = PAUSE_ICON;
+            // Reset timing so the snake doesn't lurch forward after the pause
+            lastFrameTime = performance.now();
+            lastRenderTime = lastFrameTime;
+            gameUpdateAccumulator = 0;
+            triggerHaptic('LIGHT');
+        }
+
+        function handleStartRestartClicked(){
+            if(sRActInProg||isSettingsMenuVisible)return; sRActInProg=true;
+            getAudioCtx(); // unlock/resume audio inside the user gesture so SFX can play on mobile
+            if (isGameOver || !isGameRunning) {
+                startGame();              // start fresh, or restart after game over
+            } else if (isPaused) {
+                resumeGame();             // currently paused -> resume
+            } else {
+                pauseGame();              // currently playing -> pause
+            }
+            setTimeout(()=>{sRActInProg=false;},100);
+        }
+        
+        /* ============================================================
+           SECTION: INPUT WIRING — D-pad, buttons, swipe
+           Attaches all touch/click handlers, including swipe-to-steer.
+           ============================================================ */
+        function setupInputListeners() {
+            document.addEventListener('keydown', handleKeyPress);
+            startRestartButton.addEventListener('pointerdown', (e) => { e.stopPropagation(); handleStartRestartClicked(); });
+            settingsIcon.addEventListener('pointerdown', (e) => { e.stopPropagation(); showSettingsMenu(); });
+            const pauseOverlayEl = document.getElementById('pause-overlay');
+            if (pauseOverlayEl) pauseOverlayEl.addEventListener('pointerdown', (e) => { e.stopPropagation(); resumeGame(); });
+            
+            const dpadButtons = [
+                { element: upButton, dx: 0, dy: -1 },
+                { element: downButton, dx: 0, dy: 1 },
+                { element: leftButton, dx: -1, dy: 0 },
+                { element: rightButton, dx: 1, dy: 0 }
+            ];
+            dpadButtons.forEach(buttonInfo => {
+                buttonInfo.element.addEventListener('touchstart', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    buttonInfo.element.classList.add('control-glow');
+                    queueDirectionChange(buttonInfo.dx, buttonInfo.dy);
+                }, { passive: false });
+
+                const endTouch = (e) => {
+                    e.preventDefault();
+                    buttonInfo.element.classList.remove('control-glow');
+                };
+
+                buttonInfo.element.addEventListener('touchend', endTouch);
+                buttonInfo.element.addEventListener('touchcancel', endTouch);
+            });
+
+            // --- Swipe controls (play area) ---
+            // Passive listeners + acting on the first threshold crossing of touchmove
+            // keeps this responsive and smooth (no scroll-blocking, no waiting for lift).
+            let __swipeStartX = 0, __swipeStartY = 0, __swipeDone = true;
+            const SWIPE_THRESHOLD = 24;
+            const swipeTarget = document.querySelector('.screen-border') || canvas;
+            if (swipeTarget) {
+                swipeTarget.addEventListener('touchstart', (e) => {
+                    if (!swipeEnabled) return;
+                    const t = e.changedTouches[0];
+                    __swipeStartX = t.clientX;
+                    __swipeStartY = t.clientY;
+                    __swipeDone = false;
+                }, { passive: true });
+
+                swipeTarget.addEventListener('touchmove', (e) => {
+                    if (!swipeEnabled || __swipeDone) return;
+                    const t = e.changedTouches[0];
+                    const ddx = t.clientX - __swipeStartX;
+                    const ddy = t.clientY - __swipeStartY;
+                    if (Math.abs(ddx) < SWIPE_THRESHOLD && Math.abs(ddy) < SWIPE_THRESHOLD) return;
+                    if (Math.abs(ddx) > Math.abs(ddy)) {
+                        queueDirectionChange(ddx > 0 ? 1 : -1, 0);
+                    } else {
+                        queueDirectionChange(0, ddy > 0 ? 1 : -1);
+                    }
+                    __swipeDone = true; // one turn per swipe; reset on next touchstart
+                }, { passive: true });
+            }
+        }
+
+        /* ============================================================
+           SECTION: BOOTSTRAP — runs once on load
+           Wires every control, loads saved settings, draws the first frame.
+           ============================================================ */
+        window.onload=()=>{
+            setCanvasSize();
+            loadUnlockProgress();
+            
+            const isFirstRun = localStorage.getItem('isFirstRun') === null;
+            if (isFirstRun) {
+                localStorage.setItem('isFirstRun', 'false');
+                currentDifficultyIndex = difficultyLevels.indexOf('normal');
+                currentGraphicsModeIndex = graphicsModes.findIndex(mode => mode.name === 'ULTRA');
+                currentFpsLimitIndex = fpsLimits.findIndex(fps => fps.value === 60);
+                currentPhoneColorIndex = phoneColors.findIndex(color => color.name === 'Charcoal');
+                currentDPadStyleIndex = dPadStyles.findIndex(style => style.name === 'ANODIZED');
+                obstaclesEnabled = false;
+
+                saveDifficulty();
+                saveGraphicsMode();
+                saveFpsLimit();
+                savePhoneColor();
+                saveDPadStyle();
+                saveObstacleMode();
+            }
+
+            loadDifficulty();
+            loadScreenMode();
+            loadPhoneColor();
+            loadGameTheme();
+            loadSnakeSkin();
+            loadDPadStyle();
+            loadGraphicsMode();
+            loadFpsLimit();
+            loadObstaclesEnabledSetting(); loadObstacleMode();
+            loadAudioHapticsSettings();
+            loadWallsSetting();
+            loadSwipeSetting();
+            loadLargeFontsSetting();
+            loadKeepThemeSetting();
+            loadAdvancedState();
+            loadLifetimeStats();
+            preRenderHelpIcons();
+            preRenderActivePowerups();
+            
+            setupInputListeners();
+            toggleSoundsButton.addEventListener('click', toggleSounds);
+            toggleHapticsButton.addEventListener('click', toggleHaptics);
+            saveAndPlayButton.addEventListener('click', hideSettingsAndPlay);
+            menuUnlocksHighScoresButton.addEventListener('click', showUnlocksAndHighScoresMessage);
+            menuAboutButton.addEventListener('click', showAboutInfo);
+            menuHelpButton.addEventListener('click', showHelpMessage);
+            menuExitGameButton.addEventListener('click', exitGame);
+            cycleDifficultyButton.addEventListener('click', cycleDifficulty);
+            cycleScreenModeButton.addEventListener('click', cycleScreenMode);
+            cycleGameThemeButton.addEventListener('click', cycleGameTheme);
+            cyclePhoneColorButton.addEventListener('click', cyclePhoneColor);
+            cycleSnakeSkinButton.addEventListener('click', cycleSnakeSkin);
+            cycleDPadStyleButton.addEventListener('click', cycleDPadStyle);
+            cycleGraphicsModeButton.addEventListener('click', cycleGraphicsMode);
+            cycleFpsLimitButton.addEventListener('click', cycleFpsLimit);
+            toggleObstaclesButton.addEventListener('click', toggleObstacles);
+            toggleWallsButton.addEventListener('click', toggleWalls);
+            toggleSwipeButton.addEventListener('click', toggleSwipe);
+            toggleLargeFontsButton.addEventListener('click', toggleLargeFonts);
+            toggleKeepThemeButton.addEventListener('click', toggleKeepTheme);
+            if (advancedToggle) advancedToggle.addEventListener('click', toggleAdvanced);
+
+            initGame();
+            lockScreenOrientation();
+            scaleGameToFitScreen();
+            resizeCanvasForDPR();
+            enterImmersiveMode();
+            if (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.App) {
+                const { App } = window.Capacitor.Plugins;
+                App.addListener('resume', () => { enterImmersiveMode(); });
+            }
+
+            if (isFirstRun) {
+                showGenericMessage('Welcome', '<p style="color:#f0c040; font-size:15px; line-height:1.6; text-align:center;">An open-source arcade game &#8212; free to play, and free to build on. Made across a year of learning to code with AI, and now it\'s yours to enjoy and remix.</p>');
+                const firstOk = document.getElementById('message-box-ok');
+                if (firstOk) {
+                    firstOk.onclick = () => {
+                        showGenericMessage('How to Play', '<p style="font-size:15px; line-height:1.6; text-align:center;">Swipe across the screen or tap the arrow buttons to steer the snake. Eat the food to grow longer. That\'s it &#8212; have fun!</p>');
+                    };
+                }
+            }
+        };
+        window.addEventListener('resize',()=>{
+            scaleGameToFitScreen();
+            resizeCanvasForDPR();
+        });
+    </script>
+
+<script>
+// Reduced Motion: runtime flag bound to OS setting
+(function(){
+  try {
+    const mq = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)');
+    window.__reduceMotion = !!(mq && mq.matches);
+    if (mq) {
+      if (mq.addEventListener) mq.addEventListener('change', e => { window.__reduceMotion = !!e.matches; if (typeof drawGameOnDemand==='function') drawGameOnDemand(); });
+      else if (mq.addListener) mq.addListener(e => { window.__reduceMotion = !!e.matches; if (typeof drawGameOnDemand==='function') drawGameOnDemand(); });
+    }
+  } catch(e) { window.__reduceMotion = false; }
+})();
+</script>
+
+
+<script>
+document.addEventListener('visibilitychange', () => {
+  try {
+    if (document.hidden) {
+      window.__wasRunningBeforeHide = (typeof isGameRunning !== 'undefined') ? !!isGameRunning : false;
+      if (typeof isGameRunning !== 'undefined') isGameRunning = false;
+    } else {
+      const menuOpen = (typeof isSettingsMenuVisible !== 'undefined') && isSettingsMenuVisible;
+      const msgOpen  = (typeof isMessageBoxVisible !== 'undefined') && isMessageBoxVisible;
+      const isOver   = (typeof isGameOver !== 'undefined') && isGameOver;
+      if (window.__wasRunningBeforeHide && !menuOpen && !msgOpen && !isOver) {
+        if (typeof isGameRunning !== 'undefined') isGameRunning = true;
+        if (typeof performance !== 'undefined' && typeof lastFrameTime !== 'undefined') { lastFrameTime = performance.now(); }
+      }
+    }
+  } catch(e) {}
+}, { passive: true });
+</script>
+
+
+
+    
+<script id="loadObstacleMode-patch">
+    // --- Patch: define tri-state obstacle loader used by onload ---
+    function loadObstacleMode(){
+      try {
+        var storedMode = localStorage.getItem(OBSTACLES_MODE_STORAGE_KEY);
+        if (storedMode === null) {
+          // Back-compat with old boolean
+          var oldEnabled = localStorage.getItem(OBSTACLES_ENABLED_STORAGE_KEY);
+          obstaclesEnabled = (oldEnabled === 'true');
+          obstaclesMode = obstaclesEnabled ? OBSTACLE_MODE_CLASSIC : OBSTACLE_MODE_OFF;
+        } else {
+          var parsed = parseInt(storedMode, 10);
+          if (parsed === OBSTACLE_MODE_CLASSIC || parsed === OBSTACLE_MODE_EXTREME) {
+            obstaclesMode = parsed;
+          } else {
+            obstaclesMode = OBSTACLE_MODE_OFF;
+          }
+          obstaclesEnabled = (obstaclesMode !== OBSTACLE_MODE_OFF);
+        }
+      } catch (e) {
+        obstaclesEnabled = false;
+        obstaclesMode = OBSTACLE_MODE_OFF;
+      }
+      if (typeof updateObstaclesButtonUI === 'function') { updateObstaclesButtonUI(); }
+    }
+    </script>
+    
+</body>
+</html>
