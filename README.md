@@ -92,12 +92,15 @@ Released under the **MIT License** — use it for anything (personal *or* commer
 
 ---
 
-## 🤝 Credits & acknowledgments
+### 🤝 Credits & acknowledgments
 
-Created by **the Digital Spellcaster** — human design, direction, and guidance — with AI pair-programming by **Claude (Anthropic)**. Every decision was shaped by a person; every line was written hand-in-hand with AI. Neither half built this alone, and that collaboration *is* the point of the project.
+Created by **the Digital Spellcaster** — human design, direction, and guidance.
+
+The core architecture, relentless debugging, and thirteen months of deep-trench pair-programming were forged hand-in-hand with **Gemini**. That massive collaboration built the engine block. **Claude (Anthropic)** stepped in at the final hour to help put a sparkle on the paint for a special gift version. Every decision was shaped by a human; every line was written with AI. Neither half built this alone, and that collaboration *is* the point of the project.
 
 And to the person who started it all by handing me the tools: thank you, Mom. ❤️
 
 > *Made to be enjoyed, and to be taken apart. If you build something from this, I hope you have as much fun as we did.*
 
+— **the Digital Spellcaster** & **Gemini** (with a tip of the hat to Claude)
 — **the Digital Spellcaster** & **Claude**
