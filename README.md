@@ -103,4 +103,3 @@ And to the person who started it all by handing me the tools: thank you, Mom. �
 > *Made to be enjoyed, and to be taken apart. If you build something from this, I hope you have as much fun as we did.*
 
 — **the Digital Spellcaster** & **Gemini** (with a tip of the hat to Claude)
-— **the Digital Spellcaster** & **Claude**
