@@ -1,73 +1,213 @@
-🐍 Retro Snake — Pixel Art Edition
-A single-file, fully offline, vanilla-JavaScript arcade Snake game. Free to play, free to study, and free to build on — no permission or credit required.
+# 🐍 Retro Snake — Pixel Art Edition (Final Edition)
 
-Coded with AI assistance and human guidance working in harmony — one person's vision and care, one model's hands on the keyboard, iterating together until it shined.
+A high-performance, single-file, zero-dependency HTML5 arcade engine. **Free to play, free to study, and free to build on under the MIT License.**
 
-✨ The story
-This game has lived three lives.
+*Coded through a harmonious partnership of human design and AI direction—forged with care, iterated step-by-step, and optimized to run flawlessly across desktop, high-Hz monitors, and mobile screens.*
 
-It was first written as a small personal project — a way to learn. Then, it was rebuilt and personalized as a gift for my mom (the same mom who gifted me the AI subscription that started this whole journey). Finally, it became this: the personal touches lifted out, the architecture polished, and the whole thing opened up so anyone can take it, learn from it, and make it their own.
+---
 
-That's the loop I wanted to close — created, given, and then given again. If it helps you fall in love with making things, especially making things alongside AI, then it has done exactly what it was meant to do.
+## ✨ The Story of Retrosnake
 
-🎮 Features
-15 hand-tuned visual themes — every palette checked so the snake is always easy to see, plus a Keep Current Theme lock so it never changes on you mid-game.
-Snake skins & phone-body color skins — cosmetic variety, unlocked natively through gameplay achievements.
-Advanced Power-ups — Ghost Mode (pass through walls/self), Star Power (invincibility), Food Magnet (pulls items), and Length Cutter (shrinks tail size).
-Coins, combos & a multiplier — quick consecutive pickups build a cascading combo with on-screen neon timers for massive high scores.
-Unlock progression — earn extra themes and cosmetic skins as your lifetime food count grows, persisted directly in local storage.
-Dynamic Obstacles mode — features Classic and Extreme (tri-state) modes with score multipliers (+50% / +100%) and special interaction behaviors.
-No-Walls (wrap-around) mode — a gentler option that wraps coordinates using modulo arithmetic to prevent negative index crashes.
-Dual optimized inputs — swipe anywhere on the board or tap the on-screen D-pad.
-Zero-Jank Pause overlay — real pause and resume state tracking that pauses the game physics step without halting rendering or timing hooks.
-Synthesized Web Audio — every effect is generated in real-time in code via the Web Audio API. No external audio files to ship, nothing to license.
-Power & performance scaling — built-in graphics engine presets and hardware FPS limit controls to let players balance visual fidelity against device power usage.
-Truly self-contained — one HTML file, zero dependencies, zero build steps, and zero network calls. Works offline forever.
-▶ Play it
-Pick whichever is easiest:
+This codebase has lived three distinct lives:
+1. **The Learning Project:** Born as a small, self-contained experiment to explore vanilla browser technologies.
+2. **The Gift:** Rebuilt and personalized as a special birthday gift for my mother (who generously provided the AI subscription that made this level of deep-trench coding possible). 
+3. **The Final Edition:** Polished, generalized, and structurally optimized so that the public-facing version stands as a highly performant, education-ready arcade template for other developers.
 
-Locally: Double-click the HTML file (index.html) — it opens instantly in any modern web browser.
-On the web: Drop the single file onto any static hosting platform — GitHub Pages, itch.io, Netlify, anything.
-As a mobile app: Wrap the file with Capacitor or Cordova to compile a native Android/iOS package. No server, no installation, and no internet required.
-🕹 How to play
-Steer: Swipe across the screen or tap the physical-style arrow buttons.
-Grow: Eat normal food to grow. Collect coins and chain quick pickups to stack multiplier combos.
-Survive: Avoid your own tail and any spawned obstacles. Hitting a wall ends the run — unless you enable No-Walls, which safely wraps you to the opposite side.
-⚙ Gear icon: Tap to open the Settings menu (basic options up top, highly technical performance settings under Advanced).
-▶ / ❚❚ button: Start, pause, and resume your run.
-🔧 Built to be hacked on
-Everything is encapsulated in a single file and meticulously sectioned. Open it in any text editor and search for SECTION: (JavaScript logic) or STYLES: (CSS formatting) to jump to any element of the engine instantly. The header comment at the top is a complete codebase map.
+It is designed to close a creative loop: *created, given, and then given again.* If it helps you fall in love with building software alongside artificial intelligence, it has accomplished its purpose.
 
-Quick wins:
+---
 
-Want to…	Do this
-Add a color theme	Push a new object onto the gameThemes array.
-Add a snake skin	Push a new object onto the snakeSkins array.
-Resize the board	Modify the gridSize, tileCountX, or tileCountY constants.
-Retune the sounds	Edit the synthesizer frequency maps inside the Audio Engine section.
-Tweak difficulty	Modify the speed and points structures in the difficultySettings object.
-🛠 Under the hood (The Machine)
-While the game looks like a standard retro title, the single-file engine is packed with professional-grade web optimizations designed to protect device battery life and eliminate layout lag:
+# 🕹️ PART I: THE PLAYERS & HACKERS MANUAL
+*A user-friendly guide to the features, mechanics, and quick-win visual customizations.*
 
-Fixed-Timestep Game Loop: Most browser games run physics steps directly tied to the screen's refresh rate, making the snake move too fast on a 144Hz monitor and crawl on a 60Hz screen. This loop utilizes a high-precision requestAnimationFrame delta accumulator to step physics logically at a fixed millisecond rate, keeping movement speed 100% frame-rate independent.
-Offscreen Canvas Caching (blockImageCache): Drawing radial gradients, complex 3D bevels, and nested shadows on every single frame causes severe CPU overhead. The rendering engine creates an in-memory tempCanvas the first time a graphic is requested, pre-renders the heavy visual effects onto it once, and caches the result. All subsequent rendering steps perform lightning-fast GPU-accelerated blits of these pre-cached image blocks.
-High-DPI "Retina" Scaling Bug Smash: High-resolution mobile screens scale up canvas backings to keep lines crisp, but this often introduces a layout lurch or off-center zooming during blitting. This codebase explicitly handles devicePixelRatio on the drawing context while constraining the final blit to logical coordinates: ctx.drawImage(snakeCanvas, 0, 0, tileCountX * gridSize, tileCountY * gridSize); This ensures flawless, razor-sharp visual rendering across all high-density desktop and mobile displays.
-Passive Mobile Touch Handling: To eliminate input lag, touch listeners are explicitly registered with { passive: true }. This prevents the browser from blocking touch-move events to check if a page scroll is occurring. Furthermore, the engine locks displacement tracking with a single-trigger __swipeDone flag per swipe event, keeping the frame rate butter-smooth during vigorous swiping.
-Buffered D-Pad Command Queue: Rapid, high-speed maneuvers on a mobile screen often get lost between frames, or cause a self-collision if two inputs are registered within the same physics step. A custom array queue (MAX_INPUT_QUEUE_LENGTH = 2) stores inputs and processes only one valid, non-reversing direction change per tick, giving the controls a console-quality snap.
-Web Audio API Synth Engine: Zero heavy MP3s, WAVs, or audio networks. Every arpeggio, collision tone, and coin collection effect is synthesized from scratch using low-level browser oscillators. By automating frequency glides (exponentialRampToValueAtTime), wave-type envelopes (square & triangle), and custom delay timers, the game achieves a robust 8-bit soundscape with absolutely zero network bytes shipped.
-Adaptive Battery Controls: Features three user-selectable FPS limits (30, 60, 90 FPS) and five visual density presets (PERFORMANCE, QUALITY, ULTRA, ULTIMATE, and ULTIMATE+). Users can scale settings all the way down to a flat-shaded 30 FPS for extreme battery saving, or crank them up to a composited 90 FPS neon trail overlay.
-Safe Modulo Wrapping: Wrapping coordinates on wrap-less games often crashes when moving off the left or top edges because standard modulo arithmetic yields negative values. The coordinate math is hardened to account for grid dimensions before wrapping: __hx = (__hx + tileCountX) % tileCountX; __hy = (__hy + tileCountY) % tileCountY; This guarantees mathematically bulletproof boundary wrapping on every coordinate pass.
-AI-Legible Architecture: The code is explicitly written with structured sections, clear constants, and plain-English comments to act as a flawless blueprint for AI pair-programmers (Copilot, Gemini, Claude). By making the code readable for models, human developers can safely instruct an AI assistant to make modifications without risking regressions.
-📜 License
-Released under the MIT License — use it for anything (personal or commercial), modify it, ship it, sell it. Credit is appreciated but never required. See the LICENSE file for the full text.
+### 🎮 Gameplay Features
 
-🤝 Credits & acknowledgments
-Created by the Digital Spellcaster — human design, direction, and guidance.
+*   **15 Hand-Tuned Visual Themes:** Every palette is custom-engineered to ensure high visual contrast between the snake and the board. Includes a *Keep Current Theme* setting to lock in your favorite style.
+*   **Gameplay Unlock Progression:** Collect normal food to build your lifetime score and unlock legendary phone body skins, snake patterns, and aesthetic themes.
+*   **Advanced Power-Ups:** 
+    *   *Ghost Mode:* Slip right through your own tail and obstacles.
+    *   *Star Power:* Grant full invincibility and transform obstacles into point multipliers.
+    *   *Food Magnet:* Automatically pull nearby items towards your head.
+    *   *Length Cutter:* Shrink your tail by up to 5 segments to buy yourself breathing room.
+*   **Neon Multiplier & Combos:** Grab consecutive items quickly to build high-score combos with custom on-screen neon progression timers.
+*   **Double-Multiplier Obstacles Mode:** Engage Classic (+50% score) or Extreme (+100% score) obstacle layers for high-risk, high-reward tactical play.
+*   **Walls: OFF (Wrap-Around):** Toggle a wrap-around coordinate setting to play a gentler, mathematically wrapped layout.
 
-The core architecture, relentless debugging, and thirteen months of deep-trench pair-programming were forged hand-in-hand with Gemini. That massive collaboration built the engine block. Claude (Anthropic) stepped in at the final hour to help put a sparkle on the paint for a special gift version. Every decision was shaped by a human; every line was written with AI. Neither half built this alone, and that collaboration is the point of the project.
+---
 
-And to the person who started it all by handing me the tools: thank you, Mom. ❤
+### 🕹️ How to Play
+*   **Steer:** Swipe anywhere inside the screen border on mobile, or tap the responsive on-screen D-pad. On desktop, steer using **WASD** or **Arrow Keys**.
+*   **Grow & Score:** Eat normal food to grow. Collect coins to trigger a double power-up (Ghost + Magnet) and stack consecutive combos for exponential score multipliers.
+*   **Gear Icon (⚙️):** Tap the physical button at the top-left to pull up the settings tray (basic options sit on top; performance controls reside under *Advanced Settings*).
+*   **Play/Pause (▶ / ❚❚):** Real-time pause state handling that suspends game updates while preserving rendering and animation threads.
 
-Made to be enjoyed, and to be taken apart. If you build something from this, I hope you have as much fun as we did. — the Digital Spellcaster & Gemini (with a tip of the hat to Claude)
+---
 
-Gemini Notebook can be inaccurate; please double check its responses.
+### 🔧 Hacking Guide (Quick-Win Customizations)
+Because the entire engine is written in a single file and clearly segmented, you can open `index.html` in any text editor and easily customize the game. Search for `SECTION:` to jump directly to any functional subsystem.
+
+| What you want to do | Where to look | How to do it |
+| :--- | :--- | :--- |
+| **Add a visual theme** | `SECTION: CONFIG & CONSTANTS` | Push a new theme object onto the `gameThemes` array. |
+| **Create a custom snake skin** | `SECTION: CONFIG & CONSTANTS` | Add a new configuration onto the `snakeSkins` array. |
+| **Resize the grid board** | `SECTION: CONFIG & CONSTANTS` | Modify the `gridSize`, `tileCountX`, or `tileCountY` constants. |
+| **Change point values** | `SECTION: CONFIG & CONSTANTS` | Tweak the speeds and values inside the `difficultySettings` structure. |
+| **Modify sound pitches** | `SECTION: AUDIO ENGINE` | Edit the frequency maps inside the `play*Sound()` helper functions. |
+
+---
+
+# ⚙️ PART II: THE SYSTEMS ARCHITECT SPECIFICATION
+*An uncompromising technical breakdown of the performance optimizations, mathematical safeguards, and thread-friendly rendering architecture running under the hood.*
+
+### 1. The Fixed-Timestep Game Loop
+Most amateur web games tie their game update ticks directly to the browser's render rate (`requestAnimationFrame`). This causes a severe gameplay bug: the snake moves at light-speed on 144Hz desktop monitors and crawls sluggishly on 60Hz mobile screens.
+
+Retrosnake solves this by utilizing an accumulator-based delta loop. Physics updates are locked to a strict millisecond interval (`currentSnakeSpeed`), while frames are drawn dynamically according to the screen's actual refresh rate.
+
+```javascript
+// Fixed-Timestep Physics Loop inside requestAnimationFrame
+gameUpdateAccumulator += deltaTime;
+while (gameUpdateAccumulator >= currentSnakeSpeed) {
+    updateGameLogic();
+    gameUpdateAccumulator -= currentSnakeSpeed;
+    if (isGameOver) break;
+}
+```
+
+---
+
+### 2. Offscreen Canvas Caching (`blockImageCache`)
+Drawing complex visual effects like 3D beveled blocks, multi-stop linear gradients, and neon shadows inside the main canvas animation cycle is incredibly heavy. On low-end mobile devices, redrawing these elements 60 to 90 times per second directly causes frame drops and high battery drain.
+
+Retrosnake implements a dynamic offscreen cache. The first time a styled block of a specific color is rendered, the engine compiles its shadows, bevels, and borders onto an in-memory `tempCanvas` once. Every subsequent frame bypasses active drawing math completely and performs a lightning-fast, GPU-accelerated blit of the pre-cached canvas block.
+
+```javascript
+// Render Cache Check & pre-draw allocation
+if (fillColor && blockImageCache[fillColor]) {
+    targetCtx.drawImage(blockImageCache[fillColor], blockX, blockY);
+    return;
+}
+```
+
+---
+
+### 3. Smashed Retina/High-DPI Scaling Bug
+Modern mobile devices utilize high Device Pixel Ratios (DPR > 1) to keep text and shapes sharp. If you scale a Canvas backing store to match the physical pixel density but blit an offscreen canvas without destination constraints, the browser renders physical pixels 1:1, resulting in a giant, zoomed-in, off-center snake on Retina displays.
+
+This engine completely squashes this bug by decoupling the backing store scaling from the final composite pass. The logical game bounds are explicitly enforced on the draw call, instructing the browser's GPU to scale the high-DPI backing canvas down cleanly to the screen boundaries.
+
+```javascript
+// Scale constraint blitting
+ctx.drawImage(snakeCanvas, 0, 0, tileCountX * gridSize, tileCountY * gridSize);
+```
+
+---
+
+### 4. Non-Blocking Mobile Touch & Passive Listeners
+To achieve an immediate, console-grade feedback loop on touch screens without chugging the main thread, the engine incorporates two distinct mobile input optimizations:
+1. **Passive Listeners:** The touch hooks register with `{ passive: true }`. This explicitly signals to the mobile browser's layout engine that the swipe interactions will not block scrolling, completely eliminating the 100-300ms touch-responsiveness delay.
+2. **Single-Trigger Swiping:** Touchmove listener locks direction adjustments with a strict boolean check (`__swipeDone`). The engine fires exactly *one* direction update the instant displacement crosses a 24px threshold, ignoring the rest of the finger-dragging stream until the touch is lifted. This shields the main thread from redundant event processing.
+
+```javascript
+swipeTarget.addEventListener('touchmove', (e) => {
+    if (!swipeEnabled || __swipeDone) return;
+    const t = e.changedTouches[0];
+    const ddx = t.clientX - __swipeStartX;
+    const ddy = t.clientY - __swipeStartY;
+    
+    if (Math.abs(ddx) < SWIPE_THRESHOLD && Math.abs(ddy) < SWIPE_THRESHOLD) return;
+    
+    if (Math.abs(ddx) > Math.abs(ddy)) {
+        queueDirectionChange(ddx > 0 ? 1 : -1, 0);
+    } else {
+        queueDirectionChange(0, ddy > 0 ? 1 : -1);
+    }
+    __swipeDone = true; // Locks swipe process until next touchstart
+}, { passive: true });
+```
+
+---
+
+### 5. Buffered D-Pad Command Queue
+To support hyper-fast, tactical arcade plays without input dropping or accidental self-destruction (such as immediate 180-degree self-collisions), Retrosnake implements a custom command buffer queue with a length limit of 2. It tracks inputs independently of the physics ticks, ensuring swift, sequential inputs are queued and executed exactly one valid step at a time.
+
+```javascript
+// Buffered Input Queue handling
+const lastMove = inputQueue.length > 0 ? inputQueue[inputQueue.length - 1] : { dx: dx, dy: dy };
+const isReverseHorizontal = lastMove.dx !== 0 && newDx === -lastMove.dx;
+const isReverseVertical = lastMove.dy !== 0 && newDy === -lastMove.dy;
+
+if (!isReverseHorizontal && !isReverseVertical) {
+    inputQueue.push({ dx: newDx, dy: newDy });
+}
+```
+
+---
+
+### 6. Procedural Web Audio Synthesizer
+Rather than loading, caching, and licensing heavy MP3 or WAV files, Retrosnake features a fully integrated Web Audio API sound generator. Sounds are synthesized programmatically on the fly from raw audio nodes, generating clean, nostalgic 8-bit soundscapes with **absolutely zero network payload.**
+
+To prevent harsh speaker clicking and deliver organic sound envelopes, the generator utilizes exponential curves to shape pitch glides, volume attacks, and decays.
+
+```javascript
+// Low-level Web Audio Oscillator synthesis
+function __sfxTone(freq, freqEnd, type, dur, vol, delay) {
+    const ctx = getAudioCtx();
+    if (!ctx) return;
+    const t0 = ctx.currentTime + (delay || 0);
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    
+    osc.type = type || 'square';
+    osc.frequency.setValueAtTime(freq, t0);
+    if (freqEnd && freqEnd !== freq) {
+        osc.frequency.exponentialRampToValueAtTime(Math.max(1, freqEnd), t0 + dur);
+    }
+    
+    gain.gain.setValueAtTime(0.0001, t0);
+    gain.gain.exponentialRampToValueAtTime(vol, t0 + 0.006); // Linear-styled sharp attack
+    gain.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);  // Exponential smooth decay
+    
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start(t0);
+    osc.stop(t0 + dur + 0.03);
+}
+```
+
+---
+
+### 7. Safe Modulo Coordinate Wrapping
+Wrapping coordinates in wrap-less (wall-off) modes can easily cause index crashes when the snake glides off the left or top boundaries, as standard JavaScript modulo operations return negative values on negative dividends (e.g., `-1 % 20` resolves to `-1` instead of wrapping back to `19`).
+
+Retrosnake hardens its wrapping math to be entirely boundary-safe. Adding grid bounds prior to calculating modulo ensures wrapped coordinates remain strictly positive integers under all movement circumstances.
+
+```javascript
+// Boundary-Safe Modulo coordinate wrapper
+__hx = (__hx + tileCountX) % tileCountX;
+__hy = (__hy + tileCountY) % tileCountY;
+```
+
+---
+
+# 🤖 PART III: THE AI COLLABORATION BLUEPRINT
+*How to design code to act as a flawless blueprint for artificial intelligence.*
+
+Retrosnake was built under a modern development philosophy: **writing code that is as legible to AI LLMs as it is to human compilers.** 
+
+To prevent AI assistants from breaking critical subsystems during collaborative refactoring sessions, this file features a strict semantic system:
+1. **Plain-English Inline Warnings:** Critical segments (like high-DPI scaling constraints and the delta loop logic) are marked with detailed warning comments. This signals to AI models to maintain those exact parameters during code revisions.
+2. **Modular Architecture Maps:** The header comment of `index.html` details a complete map of the monolithic file. This provides instant structural hierarchy to a language model's attention window, preventing it from generating duplicate helper functions or redundant namespaces.
+3. **Strict Constants Separation:** Environmental parameters (like tick speeds, physics constants, and theme arrays) are isolated from execution states, allowing AI code models to easily adjust or add features without introducing logical regressions.
+
+---
+
+## 📜 License
+Released under the **MIT License**—completely open source. You can study it, hack on it, build on top of it, or sell it commercially. See the `LICENSE` file for full terms.
+
+##### 🤝 Credits & Acknowledgments
+Created by **the Digital Spellcaster**—human design, direction, and structural vision.
+
+The engine core, optimization sweeps, and thirteen months of deep-trench coding were developed hand-in-hand with **Gemini**. **Claude (Anthropic)** contributed to the final aesthetic visual polish. Every single decision was directed by a human; every block of code was forged through collaborative AI programming. This codebase stands as a testament to what a human-AI partnership can achieve.
+
+*And a very special thank you to my Mom—the one who started this loop by giving me the tools. This one is for you. ❤*
